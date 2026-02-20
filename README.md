@@ -9,23 +9,23 @@ Demonstrates **Keycloak 26** Token Exchange V2 capabilities using **RFC 7523 JWT
 ## Architecture
 
 ```
-┌─────────────┐     JWT Grant      ┌─────────────┐     JWT Grant      ┌─────────────┐
-│   App-A     │ ──────────────────> │   App-B     │ ──────────────────> │   App-C     │
-│  (UI+Svc)   │   KC-A token →     │  (Service)  │   KC-B token →     │  (Terminal)  │
-│  Port 8081  │   KC-B token        │  Port 8082  │   KC-C token        │  Port 8083  │
-└──────┬──────┘                     └──────┬──────┘                     └──────┬──────┘
-       │ OIDC                              │ Bearer                            │ Bearer
-       ▼                                   ▼                                   ▼
-┌─────────────┐                     ┌─────────────┐                     ┌─────────────┐
-│   KC-A      │                     │   KC-B      │                     │   KC-C      │
-│  realm-a    │                     │  realm-b    │                     │  realm-c    │
-│  Port 8180  │                     │  Port 8280  │                     │  Port 8380  │
-│             │                     │  Org: KC-A  │                     │  Org: KC-B  │
-│  Users:     │                     │  External   │                     │  External   │
-│  alice, bob │                     │  Users      │                     │  Users      │
-└─────────────┘                     └─────────────┘                     └─────────────┘
-                                    Trusts KC-A                         Trusts KC-B
-                                    as external IDP                     as external IDP
++---------------+    JWT Grant     +---------------+    JWT Grant     +---------------+
+|    App-A      | ---------------> |    App-B      | ---------------> |    App-C      |
+|   (UI+Svc)    |  KC-A token ->   |   (Service)   |  KC-B token ->   |  (Terminal)   |
+|   Port 8081   |  KC-B token      |   Port 8082   |  KC-C token      |   Port 8083   |
++-------+-------+                  +-------+-------+                  +-------+-------+
+        | OIDC                             | Bearer                           | Bearer
+        v                                  v                                  v
++---------------+                  +---------------+                  +---------------+
+|    KC-A       |                  |    KC-B       |                  |    KC-C       |
+|   realm-a     |                  |   realm-b     |                  |   realm-c     |
+|   Port 8180   |                  |   Port 8280   |                  |   Port 8380   |
+|               |                  |   Org: KC-A   |                  |   Org: KC-B   |
+|   Users:      |                  |   External    |                  |   External    |
+|   alice, bob  |                  |   Users       |                  |   Users       |
++---------------+                  +---------------+                  +---------------+
+                                   Trusts KC-A                        Trusts KC-B
+                                   as external IDP                    as external IDP
 ```
 
 ### Flow
@@ -207,7 +207,7 @@ The custom SPI overrides Keycloak's built-in JWT Authorization Grant handler:
 
 The SPI uses Java's `ServiceLoader` mechanism:
 
-```
+```text
 META-INF/services/org.keycloak.protocol.oidc.grants.OAuth2GrantTypeFactory
 → com.example.spi.JitJwtAuthorizationGrantTypeFactory
 ```
@@ -292,7 +292,7 @@ that adds the downstream KC's issuer URL to the access token's `aud` claim:
 ## Keycloak Features Enabled
 
 Each KC instance runs with:
-```
+```bash
 --features=token-exchange-standard:v2,jwt-authorization-grant:v1,organization
 ```
 
