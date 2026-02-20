@@ -1,10 +1,48 @@
 # Keycloak Token Exchange V2 Demo
 
-Demonstrates **Keycloak 26** Token Exchange V2 capabilities using **RFC 7523 JWT Authorization Grant** for external-to-internal identity federation across a service chain, with **KC 26 Organizations** for origin-based user grouping and username namespacing.
+## The Problem
 
-**Two approaches** for user lifecycle management:
-1. **Pre-Provisioning** (default) - Script creates users, federated links, and org membership upfront
-2. **JIT via Custom SPI** - Custom Keycloak SPI creates users automatically during JWT Grant on first access
+Microservices often span **multiple security domains** — each with its own Keycloak (or other Identity Provider / IdP). When Service A (secured by KC-A) needs to call Service B (secured by KC-B), it can't just forward its KC-A token — KC-B won't accept it. The service needs a way to **exchange** its token from one domain for a valid token in the other.
+
+## What is Token Exchange?
+
+**Token Exchange** lets a service swap a token issued by one authorization server for a token issued by another. Think of it like exchanging currency at a border crossing — your euros are valid at home, but you need dollars for the next country.
+
+- **Internal Token Exchange** ([RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693)): Swapping tokens between clients within the *same* Keycloak realm. Useful, but not the focus here.
+- **External Token Exchange** ([RFC 7523 JWT Authorization Grant](https://datatracker.ietf.org/doc/html/rfc7523)): Swapping a JWT (JSON Web Token) from an *external* IdP for a local one. This is what this demo is about — **cross-realm, cross-Keycloak federation**.
+
+## What Changed in V2?
+
+Keycloak 25+ introduced **Token Exchange V2**, a standards-based rewrite:
+
+- **V1** (legacy): A custom Keycloak-specific implementation that supported both internal and external token exchange. It worked — including external-to-internal flows — but relied on Keycloak-proprietary permission models and fine-grained authorization policies, which introduced security concerns and tight coupling to Keycloak internals.
+- **V2** (current): Replaces the proprietary approach with the **RFC 7523 JWT Authorization Grant** standard. The downstream KC simply trusts the upstream KC as an IdP, validates the JWT signature via JWKS (JSON Web Key Set — the public key endpoint), and issues a local token. Standards-compliant, simpler to configure, and works across completely independent Keycloak instances without Keycloak-specific permission wiring.
+
+## Why User Links?
+
+When KC-B receives a JWT from KC-A, it needs to know *which local user* this external identity maps to. Keycloak uses **federated identity links** for this — a record that says "external user `alice` from IDP `kc-a-idp` is the same person as local user `kc-a-idp.alice`". Without this link, KC-B responds with "User not found".
+
+This creates a **user lifecycle challenge**: how do these links get created?
+
+## Where Do Organizations Fit In?
+
+**Keycloak Organizations** (introduced in KC 24) provide a way to group users by their origin. In a multi-domain federation scenario, KC-B ends up with users from multiple external IdPs — some from KC-A, some from KC-C, perhaps some local. Without organizations, these users are just a flat list with no indication of where they came from.
+
+In this demo, each downstream Keycloak has an **organization linked to each trusted IdP** (e.g., KC-B has an "KC-A" organization). When an external user is provisioned, they're automatically added to the matching organization. This means:
+
+- **Access control by origin**: you can write policies like "only KC-A users can access this resource"
+- **Organization claims in tokens**: the `organization` claim in the issued token tells downstream services which domain the user originally belongs to
+- **Audit and visibility**: admins can see at a glance which users came from which external IdP
+
+## Two Approaches in This Demo
+
+1. **Pre-Provisioning** (default) — A script creates users, federated links, and org memberships in KC-B/KC-C *before* any token exchange happens. Simple, no custom code, good for development and stable user bases.
+
+2. **JIT (Just-In-Time) via Custom SPI (Service Provider Interface)** — A Keycloak SPI plugin that intercepts the JWT Grant flow and creates users + links *on the fly* when they don't exist yet. Zero-touch user lifecycle — ideal for dynamic environments where you don't know all users upfront. The SPI extends Keycloak's built-in JWT Grant handler, so it's a drop-in enhancement, not a replacement.
+
+**Both approaches produce identical results**: namespaced usernames, organization membership claims, and federated identity links.
+
+---
 
 ## Architecture
 
@@ -39,30 +77,21 @@ Demonstrates **Keycloak 26** Token Exchange V2 capabilities using **RFC 7523 JWT
 8. App-C is the terminal service - returns its response
 9. Responses cascade back up the chain
 
-## Two Approaches
+## Approach Details
 
 ### Approach 1: Pre-Provisioning (Default)
 
-The `provision-users.sh` script creates users, federated identity links, and organization memberships **before** any JWT Grant happens. This is the simplest approach:
-
-- No custom Keycloak code needed
-- All users and links are created upfront via admin API
-- Best for: known, stable user base; development/testing
+`provision-users.sh` creates users, federated identity links, and organization memberships via admin API **before** any JWT Grant happens. No custom Keycloak code needed.
 
 ### Approach 2: JIT via Custom SPI
 
-A custom Keycloak SPI (`kc-jit-jwt-grant-spi`) extends the built-in JWT Authorization Grant handler to add **Just-In-Time user provisioning**:
+The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automatically creates users + links on first access:
 
-- When a JWT Grant request arrives for a user who doesn't exist yet, the SPI automatically:
-  1. Creates the user with a namespaced username (`kc-a-idp.alice`)
-  2. Sets the `origin` attribute (e.g., `kc-a` from IDP alias `kc-a-idp`)
-  3. Maps email, firstName, lastName from JWT claims
-  4. Creates the federated identity link
-  5. Adds the user to the organization linked to the IDP
-- Zero-touch user lifecycle - no pre-provisioning of users needed
-- Best for: dynamic user base, production deployments
-
-**Both approaches produce identical results**: namespaced usernames, organization membership claims, and federated identity links.
+1. Creates user with namespaced username (`kc-a-idp.alice`)
+2. Sets `origin` attribute (e.g., `kc-a` from IDP alias `kc-a-idp`)
+3. Maps email, firstName, lastName from JWT claims
+4. Creates the federated identity link
+5. Adds user to the organization linked to the IDP
 
 ## Prerequisites
 
