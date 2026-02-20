@@ -1,0 +1,35 @@
+# =============================================================================
+# ImageStreams for the KC Token Exchange V2 demo
+# - kc-demo-app: Quarkus application image (shared by App-A, App-B, App-C)
+# - kc-spi: Keycloak image with custom JIT JWT Grant SPI
+# - kc-demo-provision: Provisioning Job image
+# =============================================================================
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-demo-app
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-spi
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-demo-provision
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  lookupPolicy:
+    local: true

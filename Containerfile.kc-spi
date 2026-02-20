@@ -1,0 +1,20 @@
+# =============================================================================
+# Keycloak image with the custom JIT JWT Grant SPI for Just-In-Time user
+# provisioning during RFC 7523 JWT Authorization Grant token exchange.
+#
+# Stage 1: Build the SPI JAR using Maven wrapper
+# Stage 2: Layer the JAR into the official Keycloak image's providers dir
+#
+# This image is used for KC-B and KC-C in SPI mode.
+# KC-A does NOT need this — it only issues tokens, never receives JWT grants.
+# =============================================================================
+
+# Stage 1: Build the SPI JAR
+FROM registry.access.redhat.com/ubi9/openjdk-21:latest AS builder
+WORKDIR /build
+COPY --chown=185 . .
+RUN ./mvnw package -pl spi -DskipTests
+
+# Stage 2: Keycloak with SPI
+FROM quay.io/keycloak/keycloak:26.5.3
+COPY --from=builder /build/spi/target/kc-jit-jwt-grant-spi-1.0.0-SNAPSHOT.jar /opt/keycloak/providers/kc-jit-jwt-grant-spi.jar

@@ -1,0 +1,15 @@
+# =============================================================================
+# Shared Keycloak configuration — applied to all three KC instances (A, B, C).
+# Instance-specific settings (KC_HOSTNAME_URL, volumes) are in each Deployment.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kc-config
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+data:
+  KC_HTTP_PORT: "8080"
+  KC_HEALTH_ENABLED: "true"
+  KC_FEATURES: "token-exchange-standard:v2,jwt-authorization-grant:v1,organization"
+  KC_PROXY_HEADERS: "xforwarded"

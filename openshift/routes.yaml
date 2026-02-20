@@ -1,0 +1,79 @@
+# =============================================================================
+# Routes for externally-accessible components.
+#
+# Exposed:
+#   kc-a, kc-b, kc-c — Browser needs to reach KC for OIDC login + admin console
+#   app-a             — User-facing web application
+#
+# NOT exposed (internal only):
+#   app-b, app-c      — Bearer-only services, pod-to-pod only
+#
+# All Routes use edge TLS termination with HTTP->HTTPS redirect.
+# =============================================================================
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kc-a
+  labels:
+    app: kc-a
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  to:
+    kind: Service
+    name: kc-a
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kc-b
+  labels:
+    app: kc-b
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  to:
+    kind: Service
+    name: kc-b
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kc-c
+  labels:
+    app: kc-c
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  to:
+    kind: Service
+    name: kc-c
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: app-a
+  labels:
+    app: app-a
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  to:
+    kind: Service
+    name: app-a
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

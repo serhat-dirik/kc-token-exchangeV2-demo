@@ -160,8 +160,26 @@ kc-token-exchangeV2-demo/
 ├── run-app-a.sh                     # Start App-A (port 8081)
 ├── run-app-b.sh                     # Start App-B (port 8082)
 ├── run-app-c.sh                     # Start App-C (port 8083)
+├── build.sh                         # Build all modules (--app|--spi)
+├── test.sh                          # E2E tests (--mode provisioning|spi)
 │
-└── test.sh                          # E2E tests (--mode provisioning|spi)
+├── Containerfile.app                # Quarkus app image (multi-stage)
+├── Containerfile.kc-spi             # KC + SPI JAR image (SPI mode)
+├── Containerfile.provision          # Provisioning Job image
+├── deploy-openshift.sh              # OpenShift deploy orchestration
+├── undeploy-openshift.sh            # OpenShift cleanup
+│
+└── openshift/                       # OpenShift manifests
+    ├── imagestreams.yaml
+    ├── buildconfigs.yaml
+    ├── kc-config.yaml
+    ├── kc-secret.yaml
+    ├── app-secrets.yaml
+    ├── kc-{a,b,c}-deployment.yaml
+    ├── app-{a,b,c}-deployment.yaml
+    ├── services.yaml
+    ├── routes.yaml
+    └── provision-job-template.yaml
 ```
 
 ## SPI Implementation Details
@@ -312,7 +330,86 @@ The test suite supports both modes:
 - Idempotency test (second JWT Grant succeeds, no duplicate)
 - Full chain test: A→B→C with JIT at both hops (chained namespace `kc-b-idp.kc-a-idp.charlie`)
 
-## Cleanup
+## OpenShift Deployment
+
+Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.
+
+### Prerequisites
+
+- `oc` CLI logged into an OpenShift 4.x cluster
+- Sufficient quota for 6 pods + 3 build pods
+
+### Deploy
+
+```bash
+# Provisioning mode (default)
+./deploy-openshift.sh
+
+# SPI mode (JIT user creation)
+./deploy-openshift.sh --mode spi
+
+# Custom namespace
+./deploy-openshift.sh --namespace my-demo --mode spi
+```
+
+The script:
+1. Creates ImageStreams and BuildConfigs, triggers builds from GitHub
+2. Creates Routes and discovers their hostnames
+3. Patches realm JSONs to replace localhost URLs with Route/Service URLs
+4. Creates ConfigMaps (non-sensitive config) and Secrets (credentials)
+5. Deploys all 6 components with proper env var overrides
+6. Runs a provisioning Job once Keycloak instances are ready
+
+### Configuration
+
+All sensitive values (client secrets, admin credentials) are in **Secrets**. Non-sensitive config (URLs, feature flags) are in **ConfigMaps**.
+
+| Resource | Type | Contents |
+|----------|------|---------|
+| `kc-config` | ConfigMap | KC feature flags, proxy headers, health |
+| `kc-credentials` | Secret | KC admin username/password |
+| `kc-{a,b,c}-realm` | ConfigMap | Patched realm JSON for import |
+| `app-{a,b,c}-config` | ConfigMap | OIDC URLs, service URLs, client IDs |
+| `app-{a,b,c}-secrets` | Secret | OIDC client secrets, M2M client secrets |
+
+### URL Routing on OpenShift
+
+- **KC Routes** (kc-a, kc-b, kc-c): HTTPS with edge TLS — needed for browser OIDC flows, admin console, and issuer matching in JWT Grant
+- **App-A Route**: HTTPS with edge TLS — user-facing web UI
+- **App-B, App-C**: Internal ClusterIP Services only (pod-to-pod via `http://app-b:8080`)
+- **JWKS validation**: KC pods use internal Service URLs (`http://kc-a:8080`) for JWKS fetching
+
+### Cleanup
+
+```bash
+./undeploy-openshift.sh
+# or with namespace:
+./undeploy-openshift.sh --namespace my-demo
+```
+
+### Project Structure (OpenShift files)
+
+```
+openshift/
+├── imagestreams.yaml           # ImageStreams for built images
+├── buildconfigs.yaml           # BuildConfigs (Docker strategy from GitHub)
+├── kc-config.yaml              # Shared KC ConfigMap
+├── kc-secret.yaml              # KC admin credentials
+├── app-secrets.yaml            # App OIDC client secrets
+├── kc-{a,b,c}-deployment.yaml  # KC Deployments
+├── app-{a,b,c}-deployment.yaml # App Deployments
+├── services.yaml               # All 6 ClusterIP Services
+├── routes.yaml                 # Routes for KC-A, KC-B, KC-C, App-A
+└── provision-job-template.yaml # Provisioning Job (processed at deploy time)
+
+Containerfile.app               # Multi-stage Quarkus app build
+Containerfile.kc-spi            # KC image with SPI JAR (SPI mode)
+Containerfile.provision         # Provisioning Job image
+deploy-openshift.sh             # Deploy orchestration script
+undeploy-openshift.sh           # Cleanup script
+```
+
+## Local Cleanup
 
 ```bash
 ./stop-keycloaks.sh

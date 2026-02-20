@@ -1,0 +1,100 @@
+# =============================================================================
+# Services for all six components.
+# All listen on port 8080 (OpenShift default, no special SCC required).
+# KC and App Services are ClusterIP (internal). Routes expose external access.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kc-a
+  labels:
+    app: kc-a
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: kc-a
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kc-b
+  labels:
+    app: kc-b
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: kc-b
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kc-c
+  labels:
+    app: kc-c
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: kc-c
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-a
+  labels:
+    app: app-a
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: app-a
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-b
+  labels:
+    app: app-b
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: app-b
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-c
+  labels:
+    app: app-c
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: app-c
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP

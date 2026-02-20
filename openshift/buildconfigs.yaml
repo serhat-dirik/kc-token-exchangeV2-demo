@@ -1,0 +1,87 @@
+# =============================================================================
+# BuildConfigs for the KC Token Exchange V2 demo
+# All builds pull source from GitHub and use Docker strategy with Containerfiles.
+# =============================================================================
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: kc-demo-app
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/serhat-dirik/kc-token-exchangeV2-demo.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.app
+  output:
+    to:
+      kind: ImageStreamTag
+      name: kc-demo-app:latest
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: "2"
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: kc-spi
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/serhat-dirik/kc-token-exchangeV2-demo.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.kc-spi
+  output:
+    to:
+      kind: ImageStreamTag
+      name: kc-spi:latest
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: "2"
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: kc-demo-provision
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/serhat-dirik/kc-token-exchangeV2-demo.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile.provision
+  output:
+    to:
+      kind: ImageStreamTag
+      name: kc-demo-provision:latest
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: "1"

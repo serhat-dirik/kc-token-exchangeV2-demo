@@ -1,0 +1,59 @@
+# =============================================================================
+# KC-B Deployment — Service IDP (realm-b)
+# Trusts KC-A as an external IDP. Receives JWT grants from App-A's M2M client.
+# In SPI mode, deploy-openshift.sh patches the image to use the kc-spi ImageStream.
+# KC_HOSTNAME_URL placeholder is replaced by deploy-openshift.sh with the Route URL.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kc-b
+  labels:
+    app: kc-b
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kc-b
+  template:
+    metadata:
+      labels:
+        app: kc-b
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.5.3
+        args: ["start-dev", "--import-realm"]
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: kc-config
+        - secretRef:
+            name: kc-credentials
+        env:
+        - name: KC_HOSTNAME_URL
+          value: "PLACEHOLDER_KC_B_ROUTE"
+        volumeMounts:
+        - name: realm-import
+          mountPath: /opt/keycloak/data/import
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /realms/master
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: "1"
+      volumes:
+      - name: realm-import
+        configMap:
+          name: kc-b-realm

@@ -1,0 +1,13 @@
+# =============================================================================
+# Provisioning Job image — runs the provisioning scripts against Keycloak
+# instances to set up users, organizations, federated links, and scopes.
+#
+# Used by the OpenShift Job to provision after KC instances are ready.
+# Includes curl (for KC Admin REST API) and python3 (for JSON parsing).
+# =============================================================================
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+RUN microdnf install -y curl python3 && microdnf clean all
+WORKDIR /provisioning
+COPY provision-common.sh provision-users.sh provision-minimal.sh ./
+RUN chmod +x *.sh
