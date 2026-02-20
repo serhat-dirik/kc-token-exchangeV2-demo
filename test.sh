@@ -2,10 +2,12 @@
 # =============================================================================
 # End-to-end test for KC Token Exchange V2 Demo with Organizations
 #
-# Supports two modes:
-#   ./test.sh                      # Default: provisioning mode
-#   ./test.sh --mode provisioning  # Explicit provisioning mode
-#   ./test.sh --mode spi           # SPI mode (JIT user creation)
+# Supports two modes and optional OpenShift target:
+#   ./test.sh                             # Default: provisioning mode (local)
+#   ./test.sh --mode provisioning         # Explicit provisioning mode (local)
+#   ./test.sh --mode spi                  # SPI mode (local, JIT user creation)
+#   ./test.sh --openshift                 # Run against OpenShift (reads Route URLs)
+#   ./test.sh --mode spi --openshift      # SPI mode on OpenShift
 #
 # Tests the full JWT Authorization Grant chain:
 #   KC-A → KC-B → KC-C (token exchange)
@@ -26,15 +28,20 @@ set -e
 
 # ---- Parse arguments ----
 MODE="provisioning"
+OPENSHIFT=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --mode)
       MODE="$2"
       shift 2
       ;;
+    --openshift)
+      OPENSHIFT=true
+      shift
+      ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--mode provisioning|spi]"
+      echo "Usage: $0 [--mode provisioning|spi] [--openshift]"
       exit 1
       ;;
   esac
@@ -43,6 +50,26 @@ done
 if [[ "$MODE" != "provisioning" && "$MODE" != "spi" ]]; then
   echo "ERROR: Invalid mode '$MODE'. Use 'provisioning' or 'spi'."
   exit 1
+fi
+
+# ---- Endpoint URLs (configurable via env vars or --openshift) ----
+# Defaults target local development; --openshift reads Route URLs from the cluster.
+if [[ "$OPENSHIFT" == "true" ]]; then
+  OC_NS="${OC_NAMESPACE:-$(oc project -q 2>/dev/null)}"
+  echo "Resolving OpenShift Route URLs (namespace: ${OC_NS})..."
+  KC_A_URL="${KC_A_URL:-https://$(oc get route kc-a -n "$OC_NS" -o jsonpath='{.spec.host}' 2>/dev/null)}"
+  KC_B_URL="${KC_B_URL:-https://$(oc get route kc-b -n "$OC_NS" -o jsonpath='{.spec.host}' 2>/dev/null)}"
+  KC_C_URL="${KC_C_URL:-https://$(oc get route kc-c -n "$OC_NS" -o jsonpath='{.spec.host}' 2>/dev/null)}"
+  APP_A_URL="${APP_A_URL:-https://$(oc get route app-a -n "$OC_NS" -o jsonpath='{.spec.host}' 2>/dev/null)}"
+  APP_B_URL="${APP_B_URL:-http://app-b:8080}"
+  APP_C_URL="${APP_C_URL:-http://app-c:8080}"
+else
+  KC_A_URL="${KC_A_URL:-http://localhost:8180}"
+  KC_B_URL="${KC_B_URL:-http://localhost:8280}"
+  KC_C_URL="${KC_C_URL:-http://localhost:8380}"
+  APP_A_URL="${APP_A_URL:-http://localhost:8081}"
+  APP_B_URL="${APP_B_URL:-http://localhost:8082}"
+  APP_C_URL="${APP_C_URL:-http://localhost:8083}"
 fi
 
 GREEN='\033[0;32m'
@@ -79,29 +106,38 @@ echo ""
 info "=== Infrastructure Health Checks ==="
 # ---------------------------------------------------------------------------
 
-for port in 8180 8280 8380; do
-  realm="realm-$(echo $port | sed 's/8180/a/;s/8280/b/;s/8380/c/')"
-  if curl -sf -o /dev/null "http://localhost:$port/realms/$realm"; then
-    pass "KC on port $port ($realm) is up"
+for kc_entry in "KC-A:${KC_A_URL}:realm-a" "KC-B:${KC_B_URL}:realm-b" "KC-C:${KC_C_URL}:realm-c"; do
+  kc_label="${kc_entry%%:*}"
+  kc_rest="${kc_entry#*:}"
+  kc_url="${kc_rest%:*}"
+  kc_realm="${kc_rest##*:}"
+  if curl -sf -o /dev/null "${kc_url}/realms/${kc_realm}"; then
+    pass "${kc_label} (${kc_realm}) is up"
   else
-    fail "KC on port $port ($realm) is down"
+    fail "${kc_label} (${kc_realm}) is down"
   fi
 done
 
-if curl -sf -o /dev/null http://localhost:8081/; then
-  pass "App-A (8081) is up"
+if curl -sf -o /dev/null "${APP_A_URL}/"; then
+  pass "App-A is up"
 else
-  fail "App-A (8081) is down"
+  fail "App-A is down"
 fi
 
-for port in 8082 8083; do
-  code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/api/hello")
-  if [ "$code" = "401" ]; then
-    pass "App on port $port is up (401 = needs auth)"
-  else
-    fail "App on port $port returned unexpected HTTP $code"
-  fi
-done
+if [[ "$OPENSHIFT" == "true" ]]; then
+  info "  (App-B/App-C have no external Route — reachability verified via service chain tests)"
+else
+  for app_entry in "App-B:${APP_B_URL}" "App-C:${APP_C_URL}"; do
+    app_label="${app_entry%%:*}"
+    app_url="${app_entry#*:}"
+    code=$(curl -s -o /dev/null -w "%{http_code}" "${app_url}/api/hello")
+    if [ "$code" = "401" ]; then
+      pass "${app_label} is up (401 = needs auth)"
+    else
+      fail "${app_label} returned unexpected HTTP $code"
+    fi
+  done
+fi
 
 # ===========================================================================
 # MODE-SPECIFIC: Provisioning pre-existence checks
@@ -110,16 +146,16 @@ if [ "$MODE" = "provisioning" ]; then
   info ""
   mode_info "=== [PROVISIONING] Pre-Provisioned User Verification ==="
 
-  ADMIN_TOKEN_B=$(get_admin_token "http://localhost:8280") || true
+  ADMIN_TOKEN_B=$(get_admin_token "${KC_B_URL}") || true
   if [ -n "$ADMIN_TOKEN_B" ]; then
     # Check alice exists in realm-b before any JWT Grant
-    ALICE_B_EXISTS=$(curl -sf "http://localhost:8280/admin/realms/realm-b/users?username=kc-a-idp.alice&exact=true" \
+    ALICE_B_EXISTS=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/users?username=kc-a-idp.alice&exact=true" \
       -H "Authorization: Bearer $ADMIN_TOKEN_B" \
       | python3 -c "import sys,json; users=json.load(sys.stdin); print('yes' if users else 'no')" 2>/dev/null)
     [ "$ALICE_B_EXISTS" = "yes" ] && pass "User 'kc-a-idp.alice' pre-exists in realm-b" || fail "User 'kc-a-idp.alice' NOT found in realm-b (should be pre-provisioned)"
 
     # Check bob exists in realm-b
-    BOB_B_EXISTS=$(curl -sf "http://localhost:8280/admin/realms/realm-b/users?username=kc-a-idp.bob&exact=true" \
+    BOB_B_EXISTS=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/users?username=kc-a-idp.bob&exact=true" \
       -H "Authorization: Bearer $ADMIN_TOKEN_B" \
       | python3 -c "import sys,json; users=json.load(sys.stdin); print('yes' if users else 'no')" 2>/dev/null)
     [ "$BOB_B_EXISTS" = "yes" ] && pass "User 'kc-a-idp.bob' pre-exists in realm-b" || fail "User 'kc-a-idp.bob' NOT found in realm-b (should be pre-provisioned)"
@@ -127,10 +163,10 @@ if [ "$MODE" = "provisioning" ]; then
     fail "Could not get admin token for KC-B"
   fi
 
-  ADMIN_TOKEN_C=$(get_admin_token "http://localhost:8380") || true
+  ADMIN_TOKEN_C=$(get_admin_token "${KC_C_URL}") || true
   if [ -n "$ADMIN_TOKEN_C" ]; then
     # Check alice exists in realm-c
-    ALICE_C_EXISTS=$(curl -sf "http://localhost:8380/admin/realms/realm-c/users?username=kc-b-idp.kc-a-idp.alice&exact=true" \
+    ALICE_C_EXISTS=$(curl -sf "${KC_C_URL}/admin/realms/realm-c/users?username=kc-b-idp.kc-a-idp.alice&exact=true" \
       -H "Authorization: Bearer $ADMIN_TOKEN_C" \
       | python3 -c "import sys,json; users=json.load(sys.stdin); print('yes' if users else 'no')" 2>/dev/null)
     [ "$ALICE_C_EXISTS" = "yes" ] && pass "User 'kc-b-idp.kc-a-idp.alice' pre-exists in realm-c" || fail "User 'kc-b-idp.kc-a-idp.alice' NOT found in realm-c (should be pre-provisioned)"
@@ -145,7 +181,7 @@ info "=== Token Tests (alice) ==="
 # ---------------------------------------------------------------------------
 
 # Get KC-A token for alice
-TOKEN_A=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+TOKEN_A=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=alice&password=alice&scope=openid" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
@@ -169,7 +205,7 @@ roles = claims.get('realm_access', {}).get('roles', [])
 username = claims.get('preferred_username', '')
 email = claims.get('email', '')
 # Audience should be exactly the downstream KC issuer
-aud_ok = aud == 'http://localhost:8280/realms/realm-b'
+aud_ok = aud == '${KC_B_URL}/realms/realm-b'
 roles_ok = 'user' in roles and 'admin' in roles
 print(f'{aud_ok}|{roles_ok}|{username}|{email}|{aud}|{roles}')
 " 2>/dev/null)
@@ -192,7 +228,7 @@ info "=== JWT Authorization Grant: KC-A → KC-B (alice) ==="
 
 TOKEN_B=""
 if [ -n "$TOKEN_A" ]; then
-  RESULT_B=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+  RESULT_B=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_A}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization")
 
@@ -225,7 +261,7 @@ print(f'{iss}|{username}|{org_name}')
     USERNAME_B=$(echo "$B_CLAIMS" | cut -d'|' -f2)
     ORG_NAME_B=$(echo "$B_CLAIMS" | cut -d'|' -f3)
 
-    [ "$ISS_B" = "http://localhost:8280/realms/realm-b" ] && pass "KC-B token issuer correct" || fail "KC-B token issuer: $ISS_B"
+    [ "$ISS_B" = "${KC_B_URL}/realms/realm-b" ] && pass "KC-B token issuer correct" || fail "KC-B token issuer: $ISS_B"
     [ "$USERNAME_B" = "kc-a-idp.alice" ] && pass "KC-B token preferred_username = kc-a-idp.alice (namespaced)" || fail "KC-B token username: $USERNAME_B (expected kc-a-idp.alice)"
     [ "$ORG_NAME_B" = "kc-a-external-users" ] && pass "KC-B token organization = kc-a-external-users" || fail "KC-B org claim: '$ORG_NAME_B' (expected 'kc-a-external-users')"
   else
@@ -241,7 +277,7 @@ info "=== JWT Authorization Grant: KC-B → KC-C (alice) ==="
 
 TOKEN_C=""
 if [ -n "$TOKEN_B" ]; then
-  RESULT_C=$(curl -s -X POST "http://localhost:8380/realms/realm-c/protocol/openid-connect/token" \
+  RESULT_C=$(curl -s -X POST "${KC_C_URL}/realms/realm-c/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_B}&client_id=app-b-m2m-client&client_secret=app-b-m2m-secret&scope=openid%20organization")
 
@@ -273,7 +309,7 @@ print(f'{iss}|{username}|{org_name}')
     USERNAME_C=$(echo "$C_CLAIMS" | cut -d'|' -f2)
     ORG_NAME_C=$(echo "$C_CLAIMS" | cut -d'|' -f3)
 
-    [ "$ISS_C" = "http://localhost:8380/realms/realm-c" ] && pass "KC-C token issuer correct" || fail "KC-C token issuer: $ISS_C"
+    [ "$ISS_C" = "${KC_C_URL}/realms/realm-c" ] && pass "KC-C token issuer correct" || fail "KC-C token issuer: $ISS_C"
     [ "$USERNAME_C" = "kc-b-idp.kc-a-idp.alice" ] && pass "KC-C token preferred_username = kc-b-idp.kc-a-idp.alice (chained namespace)" || fail "KC-C token username: $USERNAME_C (expected kc-b-idp.kc-a-idp.alice)"
     [ "$ORG_NAME_C" = "kc-b-external-users" ] && pass "KC-C token organization = kc-b-external-users" || fail "KC-C org claim: '$ORG_NAME_C' (expected 'kc-b-external-users')"
   else
@@ -289,23 +325,31 @@ info "=== Service Chain: App-B → App-C (alice) ==="
 
 # Get FRESH tokens for the chain test. KC marks JWT Grant assertions as single-use
 # (jti tracking), so TOKEN_A and TOKEN_B from earlier tests are consumed.
-CHAIN_TOKEN_A=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+CHAIN_TOKEN_A=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=alice&password=alice&scope=openid" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
 
 CHAIN_TOKEN_B=""
 if [ -n "$CHAIN_TOKEN_A" ]; then
-  CHAIN_TOKEN_B=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+  CHAIN_TOKEN_B=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${CHAIN_TOKEN_A}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))" 2>/dev/null) || true
 fi
 
 if [ -n "$CHAIN_TOKEN_B" ]; then
-  CHAIN_RESPONSE=$(curl -sf "http://localhost:8082/api/hello" \
-    -H "Authorization: Bearer ${CHAIN_TOKEN_B}" \
-    -H "Accept: application/json" 2>/dev/null) || true
+  if [[ "$OPENSHIFT" == "true" ]]; then
+    # App-B has no external Route; call via oc exec from inside the cluster
+    APP_B_POD=$(oc get pods -l app=app-b -n "$OC_NS" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    CHAIN_RESPONSE=$(oc exec "$APP_B_POD" -n "$OC_NS" -- curl -sf "http://localhost:8080/api/hello" \
+      -H "Authorization: Bearer ${CHAIN_TOKEN_B}" \
+      -H "Accept: application/json" 2>/dev/null) || true
+  else
+    CHAIN_RESPONSE=$(curl -sf "${APP_B_URL}/api/hello" \
+      -H "Authorization: Bearer ${CHAIN_TOKEN_B}" \
+      -H "Accept: application/json" 2>/dev/null) || true
+  fi
 
   if [ -n "$CHAIN_RESPONSE" ]; then
     # Parse chain results (avoid subshell to keep PASS/FAIL counting correct)
@@ -350,7 +394,7 @@ info ""
 info "=== Token Tests (bob) ==="
 # ---------------------------------------------------------------------------
 
-TOKEN_A_BOB=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+TOKEN_A_BOB=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=bob&password=bob&scope=openid" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
@@ -363,7 +407,7 @@ fi
 
 TOKEN_B_BOB=""
 if [ -n "$TOKEN_A_BOB" ]; then
-  RESULT_B_BOB=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+  RESULT_B_BOB=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_A_BOB}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization")
 
@@ -388,9 +432,16 @@ print(json.loads(base64.b64decode(payload)).get('preferred_username',''))
 fi
 
 if [ -n "$TOKEN_B_BOB" ]; then
-  CHAIN_BOB=$(curl -sf "http://localhost:8082/api/hello" \
-    -H "Authorization: Bearer ${TOKEN_B_BOB}" \
-    -H "Accept: application/json" 2>/dev/null) || true
+  if [[ "$OPENSHIFT" == "true" ]]; then
+    APP_B_POD="${APP_B_POD:-$(oc get pods -l app=app-b -n "$OC_NS" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)}"
+    CHAIN_BOB=$(oc exec "$APP_B_POD" -n "$OC_NS" -- curl -sf "http://localhost:8080/api/hello" \
+      -H "Authorization: Bearer ${TOKEN_B_BOB}" \
+      -H "Accept: application/json" 2>/dev/null) || true
+  else
+    CHAIN_BOB=$(curl -sf "${APP_B_URL}/api/hello" \
+      -H "Authorization: Bearer ${TOKEN_B_BOB}" \
+      -H "Accept: application/json" 2>/dev/null) || true
+  fi
 
   if echo "$CHAIN_BOB" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if 'kc-a-idp.bob' in d.get('downstreamResponse','') else 1)" 2>/dev/null; then
     pass "Full chain works for bob (App-B → App-C, identity: kc-a-idp.bob)"
@@ -405,14 +456,14 @@ info "=== UI Tests ==="
 # ---------------------------------------------------------------------------
 
 # Welcome page
-if curl -sf http://localhost:8081/ | grep -q "Login"; then
+if curl -sf ${APP_A_URL}/ | grep -q "Login"; then
   pass "Welcome page shows Login button"
 else
   fail "Welcome page missing Login button"
 fi
 
 # Secured endpoint redirects to KC
-REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 http://localhost:8081/secured 2>&1)
+REDIRECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-redirs 0 ${APP_A_URL}/secured 2>&1)
 if [ "$REDIRECT_CODE" = "302" ]; then
   pass "Secured endpoint redirects to KC login (302)"
 else
@@ -428,12 +479,12 @@ if [ "$MODE" = "spi" ]; then
   mode_info "Creating fresh user 'charlie' in KC-A, testing JIT provisioning..."
 
   # Step 1: Create user 'charlie' in KC-A via admin API
-  ADMIN_TOKEN_A=$(get_admin_token "http://localhost:8180") || true
+  ADMIN_TOKEN_A=$(get_admin_token "${KC_A_URL}") || true
   if [ -z "$ADMIN_TOKEN_A" ]; then
     fail "Could not get admin token for KC-A"
   else
     # Create charlie in realm-a (idempotent: skip if exists)
-    CHARLIE_EXISTS=$(curl -sf "http://localhost:8180/admin/realms/realm-a/users?username=charlie&exact=true" \
+    CHARLIE_EXISTS=$(curl -sf "${KC_A_URL}/admin/realms/realm-a/users?username=charlie&exact=true" \
       -H "Authorization: Bearer $ADMIN_TOKEN_A" \
       | python3 -c "import sys,json; users=json.load(sys.stdin); print('yes' if users else 'no')" 2>/dev/null)
 
@@ -441,7 +492,7 @@ if [ "$MODE" = "spi" ]; then
       info "  (charlie already exists in realm-a, reusing)"
     else
       HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-        "http://localhost:8180/admin/realms/realm-a/users" \
+        "${KC_A_URL}/admin/realms/realm-a/users" \
         -H "Authorization: Bearer $ADMIN_TOKEN_A" \
         -H "Content-Type: application/json" \
         -d '{
@@ -462,13 +513,13 @@ if [ "$MODE" = "spi" ]; then
     fi
 
     # Assign roles to charlie (same as alice/bob)
-    CHARLIE_ID=$(curl -sf "http://localhost:8180/admin/realms/realm-a/users?username=charlie&exact=true" \
+    CHARLIE_ID=$(curl -sf "${KC_A_URL}/admin/realms/realm-a/users?username=charlie&exact=true" \
       -H "Authorization: Bearer $ADMIN_TOKEN_A" \
       | python3 -c "import sys,json; users=json.load(sys.stdin); print(users[0]['id'] if users else '')" 2>/dev/null)
 
     if [ -n "$CHARLIE_ID" ]; then
       # Get role IDs for 'user' and 'admin'
-      ROLES_JSON=$(curl -sf "http://localhost:8180/admin/realms/realm-a/roles" \
+      ROLES_JSON=$(curl -sf "${KC_A_URL}/admin/realms/realm-a/roles" \
         -H "Authorization: Bearer $ADMIN_TOKEN_A")
       USER_ROLE=$(echo "$ROLES_JSON" | python3 -c "
 import sys,json
@@ -489,7 +540,7 @@ for r in roles:
 
       if [ -n "$USER_ROLE" ] && [ -n "$ADMIN_ROLE" ]; then
         curl -sf -o /dev/null -X POST \
-          "http://localhost:8180/admin/realms/realm-a/users/$CHARLIE_ID/role-mappings/realm" \
+          "${KC_A_URL}/admin/realms/realm-a/users/$CHARLIE_ID/role-mappings/realm" \
           -H "Authorization: Bearer $ADMIN_TOKEN_A" \
           -H "Content-Type: application/json" \
           -d "[$USER_ROLE, $ADMIN_ROLE]" 2>/dev/null || true
@@ -497,16 +548,16 @@ for r in roles:
     fi
 
     # Step 2: Verify charlie does NOT exist in realm-b yet (JIT hasn't fired)
-    ADMIN_TOKEN_B=$(get_admin_token "http://localhost:8280") || true
+    ADMIN_TOKEN_B=$(get_admin_token "${KC_B_URL}") || true
     if [ -n "$ADMIN_TOKEN_B" ]; then
-      CHARLIE_B_BEFORE=$(curl -sf "http://localhost:8280/admin/realms/realm-b/users?username=kc-a-idp.charlie&exact=true" \
+      CHARLIE_B_BEFORE=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/users?username=kc-a-idp.charlie&exact=true" \
         -H "Authorization: Bearer $ADMIN_TOKEN_B" \
         | python3 -c "import sys,json; users=json.load(sys.stdin); print('yes' if users else 'no')" 2>/dev/null)
       [ "$CHARLIE_B_BEFORE" = "no" ] && pass "User 'kc-a-idp.charlie' does NOT exist in realm-b before JWT Grant (JIT pending)" || info "  (charlie already exists in realm-b from a previous test run)"
     fi
 
     # Step 3: Get KC-A token for charlie
-    TOKEN_A_CHARLIE=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+    TOKEN_A_CHARLIE=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
       -H "Content-Type: application/x-www-form-urlencoded" \
       -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=charlie&password=charlie&scope=openid" \
       | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
@@ -520,7 +571,7 @@ for r in roles:
     # Step 4: JWT Grant A→B for charlie (triggers JIT creation in KC-B)
     TOKEN_B_CHARLIE=""
     if [ -n "$TOKEN_A_CHARLIE" ]; then
-      RESULT_B_CHARLIE=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+      RESULT_B_CHARLIE=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_A_CHARLIE}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization")
 
@@ -563,10 +614,10 @@ print(f'{username}|{org_name}')
     mode_info "=== [SPI] JIT User Admin Verification ==="
 
     # Refresh admin token (may have expired)
-    ADMIN_TOKEN_B=$(get_admin_token "http://localhost:8280") || true
+    ADMIN_TOKEN_B=$(get_admin_token "${KC_B_URL}") || true
     if [ -n "$ADMIN_TOKEN_B" ]; then
       # Check user exists with correct attributes
-      CHARLIE_B_DATA=$(curl -sf "http://localhost:8280/admin/realms/realm-b/users?username=kc-a-idp.charlie&exact=true" \
+      CHARLIE_B_DATA=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/users?username=kc-a-idp.charlie&exact=true" \
         -H "Authorization: Bearer $ADMIN_TOKEN_B") || true
 
       CHARLIE_B_VERIFY=$(echo "$CHARLIE_B_DATA" | python3 -c "
@@ -598,7 +649,7 @@ else:
       mode_info "=== [SPI] JIT Organization Membership Verification ==="
 
       # Find the org ID for kc-a-external-users
-      ORG_DATA=$(curl -sf "http://localhost:8280/admin/realms/realm-b/organizations?search=kc-a-external-users" \
+      ORG_DATA=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/organizations?search=kc-a-external-users" \
         -H "Authorization: Bearer $ADMIN_TOKEN_B") || true
 
       ORG_ID=$(echo "$ORG_DATA" | python3 -c "
@@ -612,7 +663,7 @@ for o in orgs:
 
       if [ -n "$ORG_ID" ]; then
         # Check if charlie is a member
-        ORG_MEMBERS=$(curl -sf "http://localhost:8280/admin/realms/realm-b/organizations/$ORG_ID/members" \
+        ORG_MEMBERS=$(curl -sf "${KC_B_URL}/admin/realms/realm-b/organizations/$ORG_ID/members" \
           -H "Authorization: Bearer $ADMIN_TOKEN_B") || true
 
         CHARLIE_IN_ORG=$(echo "$ORG_MEMBERS" | python3 -c "
@@ -638,13 +689,13 @@ else:
     info ""
     mode_info "=== [SPI] JIT Idempotency Test ==="
 
-    TOKEN_A_CHARLIE2=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+    TOKEN_A_CHARLIE2=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
       -H "Content-Type: application/x-www-form-urlencoded" \
       -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=charlie&password=charlie&scope=openid" \
       | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
 
     if [ -n "$TOKEN_A_CHARLIE2" ]; then
-      RESULT_B_CHARLIE2=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+      RESULT_B_CHARLIE2=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_A_CHARLIE2}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization")
 
@@ -662,14 +713,14 @@ else:
     info ""
     mode_info "=== [SPI] JIT Full Chain Test (charlie: A → B → C) ==="
 
-    TOKEN_A_CHARLIE3=$(curl -sf -X POST "http://localhost:8180/realms/realm-a/protocol/openid-connect/token" \
+    TOKEN_A_CHARLIE3=$(curl -sf -X POST "${KC_A_URL}/realms/realm-a/protocol/openid-connect/token" \
       -H "Content-Type: application/x-www-form-urlencoded" \
       -d "grant_type=password&client_id=app-a-client&client_secret=app-a-secret&username=charlie&password=charlie&scope=openid" \
       | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])" 2>/dev/null) || true
 
     TOKEN_B_CHARLIE3=""
     if [ -n "$TOKEN_A_CHARLIE3" ]; then
-      TOKEN_B_CHARLIE3=$(curl -s -X POST "http://localhost:8280/realms/realm-b/protocol/openid-connect/token" \
+      TOKEN_B_CHARLIE3=$(curl -s -X POST "${KC_B_URL}/realms/realm-b/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_A_CHARLIE3}&client_id=app-a-m2m-client&client_secret=app-a-m2m-secret&scope=openid%20organization" \
         | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))" 2>/dev/null) || true
@@ -677,7 +728,7 @@ else:
 
     TOKEN_C_CHARLIE=""
     if [ -n "$TOKEN_B_CHARLIE3" ]; then
-      RESULT_C_CHARLIE=$(curl -s -X POST "http://localhost:8380/realms/realm-c/protocol/openid-connect/token" \
+      RESULT_C_CHARLIE=$(curl -s -X POST "${KC_C_URL}/realms/realm-c/protocol/openid-connect/token" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${TOKEN_B_CHARLIE3}&client_id=app-b-m2m-client&client_secret=app-b-m2m-secret&scope=openid%20organization")
 
