@@ -1,0 +1,16 @@
+.DS_Store
+target/
+app/target/
+spi/target/
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+.vscode/
+*.class
+*.jar
+*.log
+.env
+.claude/
+docs/plans/

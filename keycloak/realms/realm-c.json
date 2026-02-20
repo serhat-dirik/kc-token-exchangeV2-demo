@@ -1,0 +1,132 @@
+{
+  "realm": "realm-c",
+  "enabled": true,
+  "displayName": "Realm C - Terminal Service Tier",
+  "organizationsEnabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Regular user role"
+      }
+    ]
+  },
+  "defaultRoles": ["user"],
+  "clients": [
+    {
+      "clientId": "app-c-client",
+      "name": "App C Service Client (Bearer-only)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "app-c-secret",
+      "bearerOnly": false,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "app-b-m2m-client",
+      "name": "App B M2M Client for JWT Grant",
+      "description": "Confidential client used by App-B to perform RFC 7523 JWT Authorization Grant",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "app-b-m2m-secret",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "oauth2.jwt.authorization.grant.enabled": "true",
+        "oauth2.jwt.authorization.grant.idp": "kc-b-idp"
+      }
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "kc-b-idp",
+      "displayName": "Keycloak B (Upstream)",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "issuer": "http://localhost:8280/realms/realm-b",
+        "authorizationUrl": "http://localhost:8280/realms/realm-b/protocol/openid-connect/auth",
+        "tokenUrl": "http://localhost:8280/realms/realm-b/protocol/openid-connect/token",
+        "jwksUrl": "http://host.containers.internal:8280/realms/realm-b/protocol/openid-connect/certs",
+        "userInfoUrl": "http://host.containers.internal:8280/realms/realm-b/protocol/openid-connect/userinfo",
+        "logoutUrl": "http://localhost:8280/realms/realm-b/protocol/openid-connect/logout",
+        "clientId": "app-b-m2m-client",
+        "clientSecret": "not-used-for-jwt-grant",
+        "validateSignature": "true",
+        "useJwksUrl": "true",
+        "syncMode": "FORCE",
+        "hideOnLoginPage": "true",
+        "jwtAuthorizationGrantEnabled": "true"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "name": "username-mapper",
+      "identityProviderAlias": "kc-b-idp",
+      "identityProviderMapper": "oidc-username-idp-mapper",
+      "config": {
+        "template": "${ALIAS}.${CLAIM.preferred_username}",
+        "syncMode": "INHERIT"
+      }
+    },
+    {
+      "name": "email-mapper",
+      "identityProviderAlias": "kc-b-idp",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "claim": "email",
+        "user.attribute": "email",
+        "syncMode": "INHERIT"
+      }
+    },
+    {
+      "name": "first-name-mapper",
+      "identityProviderAlias": "kc-b-idp",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "claim": "given_name",
+        "user.attribute": "firstName",
+        "syncMode": "INHERIT"
+      }
+    },
+    {
+      "name": "last-name-mapper",
+      "identityProviderAlias": "kc-b-idp",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "claim": "family_name",
+        "user.attribute": "lastName",
+        "syncMode": "INHERIT"
+      }
+    },
+    {
+      "name": "origin-attribute-mapper",
+      "identityProviderAlias": "kc-b-idp",
+      "identityProviderMapper": "hardcoded-attribute-idp-mapper",
+      "config": {
+        "attribute": "origin",
+        "attribute.value": "kc-b",
+        "syncMode": "INHERIT"
+      }
+    }
+  ]
+}

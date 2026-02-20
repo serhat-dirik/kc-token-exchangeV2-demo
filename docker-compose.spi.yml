@@ -1,0 +1,22 @@
+# =============================================================================
+# Docker Compose override for SPI mode.
+# Mounts the custom JIT JWT Grant SPI JAR into KC-B and KC-C.
+#
+# Usage: podman-compose -f docker-compose.yml -f docker-compose.spi.yml up -d
+#
+# KC-A does NOT get the SPI — it only issues tokens.
+# KC-B and KC-C receive JWT assertions and need JIT user provisioning.
+#
+# The SPI JAR must be built first:  ./mvnw package -pl spi -DskipTests
+# =============================================================================
+
+services:
+  kc-b:
+    volumes:
+      - ./keycloak/realms/realm-b.json:/opt/keycloak/data/import/realm-b.json:ro
+      - ./spi/target/kc-jit-jwt-grant-spi-1.0.0-SNAPSHOT.jar:/opt/keycloak/providers/kc-jit-jwt-grant-spi.jar:ro
+
+  kc-c:
+    volumes:
+      - ./keycloak/realms/realm-c.json:/opt/keycloak/data/import/realm-c.json:ro
+      - ./spi/target/kc-jit-jwt-grant-spi-1.0.0-SNAPSHOT.jar:/opt/keycloak/providers/kc-jit-jwt-grant-spi.jar:ro
