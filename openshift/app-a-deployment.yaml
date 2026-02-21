@@ -11,6 +11,13 @@ metadata:
   labels:
     app: app-a
     app.kubernetes.io/part-of: kc-token-exchange-demo
+    app.kubernetes.io/name: app-a
+    app.kubernetes.io/component: frontend
+    app.openshift.io/runtime: quarkus
+  annotations:
+    app.openshift.io/connects-to: '[{"apiVersion":"apps/v1","kind":"Deployment","name":"kc-a"},{"apiVersion":"apps/v1","kind":"Deployment","name":"app-b"}]'
+    app.openshift.io/vcs-uri: 'https://github.com/serhat-dirik/kc-token-exchangeV2-demo'
+    app.openshift.io/vcs-ref: 'main'
 spec:
   replicas: 1
   selector:

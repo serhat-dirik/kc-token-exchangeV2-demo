@@ -10,6 +10,12 @@ metadata:
   labels:
     app: kc-a
     app.kubernetes.io/part-of: kc-token-exchange-demo
+    app.kubernetes.io/name: kc-a
+    app.kubernetes.io/component: identity-provider
+    app.openshift.io/runtime: keycloak
+  annotations:
+    app.openshift.io/vcs-uri: 'https://github.com/serhat-dirik/kc-token-exchangeV2-demo'
+    app.openshift.io/vcs-ref: 'main'
 spec:
   replicas: 1
   selector:
