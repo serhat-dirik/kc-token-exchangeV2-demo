@@ -187,6 +187,9 @@ oc create configmap app-a-config \
     --from-literal=QUARKUS_OIDC_CLIENT_ID="app-a-client" \
     --from-literal=QUARKUS_OIDC_APPLICATION_TYPE="web-app" \
     --from-literal=QUARKUS_OIDC_ROLES_SOURCE="accesstoken" \
+    --from-literal=QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_HOST="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_PREFIX="true" \
     --from-literal=APP_TARGET_SERVICE_URL="http://app-b:8080/api/hello" \
     --from-literal=APP_TARGET_KC_TOKEN_URL="${KC_B_ROUTE}/realms/realm-b/protocol/openid-connect/token" \
     --from-literal=APP_TARGET_KC_CLIENT_ID="app-a-m2m-client"
@@ -197,6 +200,9 @@ oc create configmap app-b-config \
     --from-literal=QUARKUS_OIDC_CLIENT_ID="app-b-client" \
     --from-literal=QUARKUS_OIDC_APPLICATION_TYPE="service" \
     --from-literal=QUARKUS_OIDC_ROLES_SOURCE="accesstoken" \
+    --from-literal=QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_HOST="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_PREFIX="true" \
     --from-literal=APP_TARGET_SERVICE_URL="http://app-c:8080/api/hello" \
     --from-literal=APP_TARGET_KC_TOKEN_URL="${KC_C_ROUTE}/realms/realm-c/protocol/openid-connect/token" \
     --from-literal=APP_TARGET_KC_CLIENT_ID="app-b-m2m-client"
@@ -206,7 +212,10 @@ oc create configmap app-c-config \
     --from-literal=QUARKUS_OIDC_AUTH_SERVER_URL="${KC_C_ROUTE}/realms/realm-c" \
     --from-literal=QUARKUS_OIDC_CLIENT_ID="app-c-client" \
     --from-literal=QUARKUS_OIDC_APPLICATION_TYPE="service" \
-    --from-literal=QUARKUS_OIDC_ROLES_SOURCE="accesstoken"
+    --from-literal=QUARKUS_OIDC_ROLES_SOURCE="accesstoken" \
+    --from-literal=QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_HOST="true" \
+    --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_PREFIX="true"
 
 oc label configmap app-a-config app=app-a app.kubernetes.io/part-of=kc-token-exchange-demo --overwrite
 oc label configmap app-b-config app=app-b app.kubernetes.io/part-of=kc-token-exchange-demo --overwrite
