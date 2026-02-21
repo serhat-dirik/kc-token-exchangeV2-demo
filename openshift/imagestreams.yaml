@@ -1,0 +1,25 @@
+# =============================================================================
+# ImageStreams for the KC Token Exchange V2 demo
+# Required before BuildConfigs can push — builds fail with
+# InvalidOutputReference if the target ImageStream doesn't exist.
+# =============================================================================
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-demo-app
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-spi
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: kc-demo-provision
+  labels:
+    app.kubernetes.io/part-of: kc-token-exchange-demo

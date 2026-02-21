@@ -82,8 +82,9 @@ else
 fi
 echo ""
 
-# ---- Step 2: BuildConfigs (ImageStreams auto-created by builds) ----
-echo "[2/9] Applying BuildConfigs..."
+# ---- Step 2: ImageStreams + BuildConfigs ----
+echo "[2/9] Applying ImageStreams and BuildConfigs..."
+oc apply -f "${OPENSHIFT_DIR}/imagestreams.yaml"
 oc apply -f "${OPENSHIFT_DIR}/buildconfigs.yaml"
 
 if [[ "$SKIP_BUILD" == "false" ]]; then
