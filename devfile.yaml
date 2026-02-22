@@ -34,8 +34,8 @@ components:
   - name: tools
     container:
       image: registry.redhat.io/devspaces/udi-rhel8:latest
-      memoryLimit: 6Gi
-      memoryRequest: 1Gi
+      memoryLimit: 4Gi
+      memoryRequest: 512Mi
       cpuLimit: "2"
       cpuRequest: 200m
       mountSources: true
@@ -75,10 +75,14 @@ commands:
     exec:
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        sdk default java 21 &&
-        java -version &&
-        echo "Java 21 configured. Ready to develop!"
+        if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+          source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+          sdk default java 21.0 2>/dev/null ||
+          sdk default java 21 2>/dev/null ||
+          echo "WARN: Could not set Java 21 via sdkman";
+        fi &&
+        java -version 2>&1 &&
+        echo "Workspace ready."
       workingDir: ${PROJECT_SOURCE}
 
   # ---- Build ----
@@ -117,7 +121,7 @@ commands:
       component: tools
       commandLine: >-
         source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        sdk use java 21 &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-a -Ddebug=5005
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -130,7 +134,7 @@ commands:
       component: tools
       commandLine: >-
         source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        sdk use java 21 &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-b -Ddebug=5006
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -142,7 +146,7 @@ commands:
       component: tools
       commandLine: >-
         source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        sdk use java 21 &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-c -Ddebug=5007
       workingDir: ${PROJECT_SOURCE}
       group:
