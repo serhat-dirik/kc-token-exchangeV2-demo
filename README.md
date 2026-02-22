@@ -1,50 +1,37 @@
 # Keycloak Token Exchange V2 Demo
 
-## The Problem
+A working demo of **cross-Keycloak token exchange** using the RFC 7523 JWT Authorization Grant (Token Exchange V2), with Keycloak Organizations for multi-tenant user grouping and two approaches to user lifecycle management.
 
-Microservices often span **multiple security domains** — each with its own Keycloak (or other Identity Provider / IdP). When Service A (secured by KC-A) needs to call Service B (secured by KC-B), it can't just forward its KC-A token — KC-B won't accept it. The service needs a way to **exchange** its token from one domain for a valid token in the other.
+## Table of Contents
 
-## What is Token Exchange?
-
-**Token Exchange** lets a service swap a token issued by one authorization server for a token issued by another. Think of it like exchanging currency at a border crossing — your euros are valid at home, but you need dollars for the next country.
-
-- **Internal Token Exchange** ([RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693)): Swapping tokens between clients within the *same* Keycloak realm. Useful, but not the focus here.
-- **External Token Exchange** ([RFC 7523 JWT Authorization Grant](https://datatracker.ietf.org/doc/html/rfc7523)): Swapping a JWT (JSON Web Token) from an *external* IdP for a local one. This is what this demo is about — **cross-realm, cross-Keycloak federation**.
-
-## What Changed in V2?
-
-Keycloak 25+ introduced **Token Exchange V2**, a standards-based rewrite:
-
-- **V1** (legacy): A custom Keycloak-specific implementation that supported both internal and external token exchange. It worked — including external-to-internal flows — but relied on Keycloak-proprietary permission models and fine-grained authorization policies, which introduced security concerns and tight coupling to Keycloak internals.
-- **V2** (current): Replaces the proprietary approach with the **RFC 7523 JWT Authorization Grant** standard. The downstream KC simply trusts the upstream KC as an IdP, validates the JWT signature via JWKS (JSON Web Key Set — the public key endpoint), and issues a local token. Standards-compliant, simpler to configure, and works across completely independent Keycloak instances without Keycloak-specific permission wiring.
-
-## Why User Links?
-
-When KC-B receives a JWT from KC-A, it needs to know *which local user* this external identity maps to. Keycloak uses **federated identity links** for this — a record that says "external user `alice` from IDP `kc-a-idp` is the same person as local user `kc-a-idp.alice`". Without this link, KC-B responds with "User not found".
-
-This creates a **user lifecycle challenge**: how do these links get created?
-
-## Where Do Organizations Fit In?
-
-**Keycloak Organizations** (introduced in KC 24) provide a way to group users by their origin. In a multi-domain federation scenario, KC-B ends up with users from multiple external IdPs — some from KC-A, some from KC-C, perhaps some local. Without organizations, these users are just a flat list with no indication of where they came from.
-
-In this demo, each downstream Keycloak has an **organization linked to each trusted IdP** (e.g., KC-B has an "KC-A" organization). When an external user is provisioned, they're automatically added to the matching organization. This means:
-
-- **Access control by origin**: you can write policies like "only KC-A users can access this resource"
-- **Organization claims in tokens**: the `organization` claim in the issued token tells downstream services which domain the user originally belongs to
-- **Audit and visibility**: admins can see at a glance which users came from which external IdP
-
-## Two Approaches in This Demo
-
-1. **Pre-Provisioning** (default) — A script creates users, federated links, and org memberships in KC-B/KC-C *before* any token exchange happens. Simple, no custom code, good for development and stable user bases.
-
-2. **JIT (Just-In-Time) via Custom SPI (Service Provider Interface)** — A Keycloak SPI plugin that intercepts the JWT Grant flow and creates users + links *on the fly* when they don't exist yet. Zero-touch user lifecycle — ideal for dynamic environments where you don't know all users upfront. The SPI extends Keycloak's built-in JWT Grant handler, so it's a drop-in enhancement, not a replacement.
-
-**Both approaches produce identical results**: namespaced usernames, organization membership claims, and federated identity links.
+- [What This Demo Does](#what-this-demo-does)
+- [Background & Concepts](#background--concepts)
+- [Prerequisites](#prerequisites)
+- [Quick Start — Local](#quick-start--local)
+- [Quick Start — OpenShift](#quick-start--openshift)
+- [Quick Start — Dev Spaces](#quick-start--dev-spaces)
+- [Version Management](#version-management)
+- [Test Suite](#test-suite)
+- [SPI Implementation Details](#spi-implementation-details)
+- [Configuration & Project Structure](#configuration--project-structure)
+- [Cleanup](#cleanup)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Architecture
+## What This Demo Does
+
+Microservices often span **multiple security domains** — each with its own Keycloak. When Service A (secured by KC-A) needs to call Service B (secured by KC-B), it can't just forward its KC-A token — KC-B won't accept it. The service needs a way to **exchange** its token from one domain for a valid token in the other.
+
+This demo shows **two approaches** to solving this:
+
+1. **Pre-Provisioning** (default) — A script creates users, federated links, and org memberships in KC-B/KC-C *before* any token exchange happens. Simple, no custom code, good for development and stable user bases.
+
+2. **JIT (Just-In-Time) via Custom SPI** — A Keycloak SPI plugin that intercepts the JWT Grant flow and creates users + links *on the fly* when they don't exist yet. Zero-touch user lifecycle — ideal for dynamic environments where you don't know all users upfront.
+
+**Both approaches produce identical results**: namespaced usernames, organization membership claims, and federated identity links.
+
+### Architecture
 
 ```
 +---------------+    JWT Grant     +---------------+    JWT Grant     +---------------+
@@ -67,6 +54,7 @@ In this demo, each downstream Keycloak has an **organization linked to each trus
 ```
 
 ### Flow
+
 1. User logs into **App-A** via **KC-A** (OIDC Authorization Code flow)
 2. User clicks "Call Downstream Service"
 3. App-A takes its KC-A access token and performs **RFC 7523 JWT Authorization Grant** against **KC-B**
@@ -77,21 +65,114 @@ In this demo, each downstream Keycloak has an **organization linked to each trus
 8. App-C is the terminal service - returns its response
 9. Responses cascade back up the chain
 
-## Approach Details
+---
 
-### Approach 1: Pre-Provisioning (Default)
+<details>
+<summary><strong>Background & Concepts</strong> — Token Exchange, V2 changes, User Links, Organizations</summary>
 
-`provision-users.sh` creates users, federated identity links, and organization memberships via admin API **before** any JWT Grant happens. No custom Keycloak code needed.
+### What is Token Exchange?
 
-### Approach 2: JIT via Custom SPI
+**Token Exchange** lets a service swap a token issued by one authorization server for a token issued by another. Think of it like exchanging currency at a border crossing — your euros are valid at home, but you need dollars for the next country.
 
-The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automatically creates users + links on first access:
+- **Internal Token Exchange** ([RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693)): Swapping tokens between clients within the *same* Keycloak realm. Useful, but not the focus here.
+- **External Token Exchange** ([RFC 7523 JWT Authorization Grant](https://datatracker.ietf.org/doc/html/rfc7523)): Swapping a JWT (JSON Web Token) from an *external* IdP for a local one. This is what this demo is about — **cross-realm, cross-Keycloak federation**.
 
-1. Creates user with namespaced username (`kc-a-idp.alice`)
-2. Sets `origin` attribute (e.g., `kc-a` from IDP alias `kc-a-idp`)
-3. Maps email, firstName, lastName from JWT claims
-4. Creates the federated identity link
-5. Adds user to the organization linked to the IDP
+### What Changed in V2?
+
+Keycloak 25+ introduced **Token Exchange V2**, a standards-based rewrite:
+
+- **V1** (legacy): A custom Keycloak-specific implementation that supported both internal and external token exchange. It worked — including external-to-internal flows — but relied on Keycloak-proprietary permission models and fine-grained authorization policies, which introduced security concerns and tight coupling to Keycloak internals.
+- **V2** (current): Replaces the proprietary approach with the **RFC 7523 JWT Authorization Grant** standard. The downstream KC simply trusts the upstream KC as an IdP, validates the JWT signature via JWKS (JSON Web Key Set — the public key endpoint), and issues a local token. Standards-compliant, simpler to configure, and works across completely independent Keycloak instances without Keycloak-specific permission wiring.
+
+### Why User Links?
+
+When KC-B receives a JWT from KC-A, it needs to know *which local user* this external identity maps to. Keycloak uses **federated identity links** for this — a record that says "external user `alice` from IDP `kc-a-idp` is the same person as local user `kc-a-idp.alice`". Without this link, KC-B responds with "User not found".
+
+This creates a **user lifecycle challenge**: how do these links get created?
+
+### Where Do Organizations Fit In?
+
+**Keycloak Organizations** (introduced in KC 24) provide a way to group users by their origin. In a multi-domain federation scenario, KC-B ends up with users from multiple external IdPs — some from KC-A, some from KC-C, perhaps some local. Without organizations, these users are just a flat list with no indication of where they came from.
+
+In this demo, each downstream Keycloak has an **organization linked to each trusted IdP** (e.g., KC-B has an "KC-A" organization). When an external user is provisioned, they're automatically added to the matching organization. This means:
+
+- **Access control by origin**: you can write policies like "only KC-A users can access this resource"
+- **Organization claims in tokens**: the `organization` claim in the issued token tells downstream services which domain the user originally belongs to
+- **Audit and visibility**: admins can see at a glance which users came from which external IdP
+
+### Organizations and Username Namespacing
+
+In a production scenario, KC-B and KC-C are operated by **different organizations**:
+
+1. **Cross-domain access**: KC-B cannot access KC-A's admin API to import users
+2. **Dynamic users**: KC-A adds/removes users over time
+3. **Username conflicts**: Both orgs might have a user "bob"
+4. **Diverse email domains**: The upstream org might be a social platform where users have @gmail.com, @yahoo.com, etc.
+
+**Username namespacing** via the IDP username mapper template `${ALIAS}.${CLAIM.preferred_username}`:
+- KC-A user `bob` becomes `kc-a-idp.bob` in realm-b
+- KC-B user `kc-a-idp.bob` becomes `kc-b-idp.kc-a-idp.bob` in realm-c
+- Local KC-B user `bob` remains `bob` - no conflict
+
+**Organization membership** defined by origin IDP, not email domain:
+- Realm-B: Organization "kc-a-external-users" linked to `kc-a-idp`
+- Realm-C: Organization "kc-b-external-users" linked to `kc-b-idp`
+
+**Organization claims in tokens**:
+```json
+{
+  "organization": {
+    "<org-id>": {
+      "name": "kc-a-external-users"
+    }
+  }
+}
+```
+
+### Token Exchange Flow (RFC 7523)
+
+The JWT Authorization Grant request:
+
+```http
+POST /realms/realm-b/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer
+&assertion={access_token_from_KC-A}
+&client_id=app-a-m2m-client
+&client_secret=app-a-m2m-secret
+&scope=openid organization
+```
+
+KC-B validates the assertion against the configured IDP (kc-a-idp) using KC-A's JWKS endpoint,
+resolves the user via the **federated identity link** (by `sub` UUID, not by username), and
+issues a local access token with organization membership claims.
+
+#### Audience (`aud`) Claim Configuration
+
+RFC 7523 requires the assertion's `aud` claim to identify the receiving authorization server.
+Each upstream client includes an **audience protocol mapper** (`oidc-audience-mapper`)
+that adds the downstream KC's issuer URL to the access token's `aud` claim:
+
+| Upstream Client | Audience Added | Purpose |
+|----------------|----------------|---------|
+| `app-a-client` (realm-a) | `http://localhost:8280/realms/realm-b` | KC-A token accepted by KC-B |
+| `app-a-m2m-client` (realm-b) | `http://localhost:8380/realms/realm-c` | KC-B token accepted by KC-C |
+
+### Keycloak Features Enabled
+
+Each KC instance runs with:
+```bash
+--features=token-exchange-standard:v2,jwt-authorization-grant:v1,organization
+```
+
+- **token-exchange-standard:v2** - RFC 8693 Standard Token Exchange (internal-to-internal, supported)
+- **jwt-authorization-grant:v1** - RFC 7523 JWT Authorization Grant (external-to-internal federation, preview)
+- **organization** - KC 26 Organizations for multi-tenancy and IDP-based user grouping
+
+</details>
+
+---
 
 ## Prerequisites
 
@@ -100,7 +181,7 @@ The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automaticall
 - Maven (included via wrapper)
 - `oc` CLI (for OpenShift deployment)
 
-## Quick Start
+## Quick Start — Local
 
 ### Pre-Provisioning Mode (Default)
 
@@ -135,7 +216,82 @@ The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automaticall
 ./test.sh --mode spi
 ```
 
-### Version Management
+### Manual Testing
+
+1. Open http://localhost:8081
+2. Click **Login** - Redirected to KC-A login page
+3. Login as `alice` / `alice` (or `bob` / `bob`)
+4. See welcome page with user info (name, email, roles)
+5. Click **Call Downstream Service** - See the chained response with organization info
+
+**Admin console**: http://localhost:8180 (8280, 8380) - `admin/admin`
+
+### Test Users (Realm-A)
+
+| Username | Password | Roles        |
+|----------|----------|-------------|
+| alice    | alice    | user, admin |
+| bob      | bob      | user        |
+
+In SPI mode, the tests also create a `charlie` user dynamically to verify JIT provisioning.
+
+## Quick Start — OpenShift
+
+Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.
+
+**Prerequisites**: `oc` CLI logged into an OpenShift 4.x cluster with sufficient quota for 6 pods + 3 build pods.
+
+```bash
+# Provisioning mode (default)
+./deploy-openshift.sh
+
+# SPI mode (JIT user creation)
+./deploy-openshift.sh --mode spi
+
+# Custom namespace
+./deploy-openshift.sh --namespace my-demo --mode spi
+```
+
+The script reads version info from `.env`, creates ImageStreams and BuildConfigs, discovers Route hostnames, patches realm JSONs, deploys all 6 components, and runs a provisioning Job.
+
+All deployments include **topology annotations** (`app.openshift.io/vcs-uri`, `app.openshift.io/connects-to`) for the OpenShift Developer Console topology view, with direct links to Dev Spaces from each deployment.
+
+```bash
+# Test against OpenShift
+./test.sh --openshift
+./test.sh --mode spi --openshift
+
+# Cleanup
+./undeploy-openshift.sh
+```
+
+## Quick Start — Dev Spaces
+
+The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-based IDE workspace pre-configured with all required tools.
+
+**Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.
+
+The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java 8/11/17/21 (via sdkman, defaulting to 21), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `podman`.
+
+### Available Commands (Command Palette)
+
+| # | Command | Description |
+|---|---------|-------------|
+| 01 | Build App | `./mvnw package -pl app -DskipTests` |
+| 02 | Build SPI | `./mvnw package -pl spi -DskipTests` |
+| 03 | Build All Modules | `./mvnw package -DskipTests` |
+| 04 | Run App-A | Quarkus dev mode, port 8081 |
+| 05 | Run App-B | Quarkus dev mode, port 8082 |
+| 06 | Run App-C | Quarkus dev mode, port 8083 |
+| 07 | Test (Provisioning) | `./test.sh --mode provisioning` |
+| 08 | Test (SPI) | `./test.sh --mode spi` |
+| 09 | Test (OpenShift) | `./test.sh --openshift` |
+| 10 | Deploy (Provisioning) | `./deploy-openshift.sh --mode provisioning` |
+| 11 | Deploy (SPI) | `./deploy-openshift.sh --mode spi` |
+| 12 | Provision Users | `./provision-users.sh` |
+| 13 | Provision Minimal | `./provision-minimal.sh` |
+
+## Version Management
 
 All dependency versions are centralized in the `.env` file:
 
@@ -153,26 +309,115 @@ These values propagate automatically to:
 
 > **Note:** `pom.xml` properties (`<keycloak.version>`, `<quarkus.platform.version>`, `<maven.compiler.release>`) must be updated manually to match.
 
-### Manual Testing
+## Test Suite
 
-1. Open http://localhost:8081
-2. Click **Login** - Redirected to KC-A login page
-3. Login as `alice` / `alice` (or `bob` / `bob`)
-4. See welcome page with user info (name, email, roles)
-5. Click **Call Downstream Service** - See the chained response with organization info
+The test suite supports both modes and both targets:
 
-**Admin console**: http://localhost:8180 (8280, 8380) - `admin/admin`
+```bash
+# Local testing
+./test.sh                      # Provisioning mode (default)
+./test.sh --mode provisioning  # Explicit provisioning mode
+./test.sh --mode spi           # SPI mode with JIT tests
 
-## Test Users (Realm-A)
+# OpenShift testing (uses Route URLs instead of localhost)
+./test.sh --openshift                # Provisioning mode on OpenShift
+./test.sh --mode spi --openshift     # SPI mode on OpenShift
+```
 
-| Username | Password | Roles        |
-|----------|----------|-------------|
-| alice    | alice    | user, admin |
-| bob      | bob      | user        |
+**Core tests** (both modes, ~28 tests):
+- Infrastructure health checks (3 KCs + 3 apps)
+- KC-A token claims (audience, roles, username, email)
+- JWT Grant chain: KC-A → KC-B → KC-C (token claims, namespaced usernames, org claims)
+- Service chain: App-A → App-B → App-C (identity preservation)
+- Bob tests (JWT Grant + full chain)
+- UI tests (welcome page, OIDC redirect)
 
-In SPI mode, the tests also create a `charlie` user dynamically to verify JIT provisioning.
+**Provisioning-specific tests** (~3 tests):
+- Pre-existence verification of alice and bob in realm-b and realm-c
 
-## Project Structure
+**SPI-specific tests** (~15 tests):
+- Creates fresh user "charlie" in KC-A via admin API
+- Verifies charlie does NOT exist in realm-b before JWT Grant
+- JWT Grant triggers JIT creation in KC-B (namespaced username, org claim)
+- Admin API verification (user attributes: origin, email, firstName)
+- Organization membership verification via admin API
+- Idempotency test (second JWT Grant succeeds, no duplicate)
+- Full chain test: A→B→C with JIT at both hops (chained namespace `kc-b-idp.kc-a-idp.charlie`)
+
+---
+
+<details>
+<summary><strong>SPI Implementation Details</strong> — JIT JWT Grant plugin internals</summary>
+
+### How It Works
+
+The custom SPI overrides Keycloak's built-in JWT Authorization Grant handler:
+
+1. **`JitJwtAuthorizationGrantTypeFactory`** registers with the same grant type ID (`urn:ietf:params:oauth:grant-type:jwt-bearer`) but with `order() = 1` (higher priority than the built-in `0`). Keycloak's provider loader picks the higher-priority factory.
+
+2. **`JitJwtAuthorizationGrantType`** extends the built-in `JWTAuthorizationGrantType` and overrides `process()`:
+   - Extracts the JWT assertion from the request
+   - Decodes the payload (Base64 only — full signature validation is done by the parent)
+   - Looks up the user by federated identity link (IDP alias + upstream `sub`)
+   - If user exists → proceeds to normal flow
+   - If user doesn't exist → JIT provision:
+     - Creates user with namespaced username: `{idp_alias}.{preferred_username}`
+     - Sets `origin` attribute (strip `-idp` suffix: `kc-a-idp` → `kc-a`)
+     - Maps email, firstName, lastName from JWT claims
+     - Creates federated identity link
+     - Adds user to organization via `OrganizationProvider`
+   - Calls `super.process()` — JWT Grant now succeeds because user + link exist
+
+### Service Loader Registration
+
+The SPI uses Java's `ServiceLoader` mechanism:
+
+```text
+META-INF/services/org.keycloak.protocol.oidc.grants.OAuth2GrantTypeFactory
+→ com.example.spi.JitJwtAuthorizationGrantTypeFactory
+```
+
+### Deployment
+
+In `start-dev` mode, Keycloak auto-discovers JARs in `/opt/keycloak/providers/`. The `docker-compose.spi.yml` override file mounts the SPI JAR into KC-B and KC-C (they receive JWT assertions). KC-A doesn't need the SPI (it only issues tokens).
+
+</details>
+
+---
+
+<details>
+<summary><strong>Configuration & Project Structure</strong></summary>
+
+### Application Configuration
+
+All application configuration is in `app/src/main/resources/application.properties`.
+
+Key properties per profile:
+- `app.target-service-url` - URL of the downstream service to call
+- `app.target-kc-token-url` - Downstream KC's token endpoint for JWT Grant
+- `app.target-kc-client-id` - Client ID at the downstream KC
+- `app.target-kc-client-secret` - Client secret at the downstream KC
+
+### OpenShift Configuration
+
+All sensitive values (client secrets, admin credentials) are in **Secrets**. Non-sensitive config (URLs, feature flags) are in **ConfigMaps**.
+
+| Resource | Type | Contents |
+|----------|------|---------|
+| `kc-config` | ConfigMap | KC feature flags, proxy headers, health |
+| `kc-credentials` | Secret | KC admin username/password |
+| `kc-{a,b,c}-realm` | ConfigMap | Patched realm JSON for import |
+| `app-{a,b,c}-config` | ConfigMap | OIDC URLs, service URLs, client IDs |
+| `app-{a,b,c}-secrets` | Secret | OIDC client secrets, M2M client secrets |
+
+### URL Routing on OpenShift
+
+- **KC Routes** (kc-a, kc-b, kc-c): HTTPS with edge TLS — needed for browser OIDC flows, admin console, and issuer matching in JWT Grant
+- **App-A Route**: HTTPS with edge TLS — user-facing web UI
+- **App-B, App-C**: Internal ClusterIP Services only (pod-to-pod via `http://app-b:8080`)
+- **JWKS validation**: KC pods use internal Service URLs (`http://kc-a:8080`) for JWKS fetching
+
+### Project Structure
 
 ```
 kc-token-exchangeV2-demo/
@@ -232,280 +477,17 @@ kc-token-exchangeV2-demo/
     └── provision-job-template.yaml
 ```
 
-## SPI Implementation Details
+</details>
 
-### How It Works
+---
 
-The custom SPI overrides Keycloak's built-in JWT Authorization Grant handler:
+## Cleanup
 
-1. **`JitJwtAuthorizationGrantTypeFactory`** registers with the same grant type ID (`urn:ietf:params:oauth:grant-type:jwt-bearer`) but with `order() = 1` (higher priority than the built-in `0`). Keycloak's provider loader picks the higher-priority factory.
-
-2. **`JitJwtAuthorizationGrantType`** extends the built-in `JWTAuthorizationGrantType` and overrides `process()`:
-   - Extracts the JWT assertion from the request
-   - Decodes the payload (Base64 only — full signature validation is done by the parent)
-   - Looks up the user by federated identity link (IDP alias + upstream `sub`)
-   - If user exists → proceeds to normal flow
-   - If user doesn't exist → JIT provision:
-     - Creates user with namespaced username: `{idp_alias}.{preferred_username}`
-     - Sets `origin` attribute (strip `-idp` suffix: `kc-a-idp` → `kc-a`)
-     - Maps email, firstName, lastName from JWT claims
-     - Creates federated identity link
-     - Adds user to organization via `OrganizationProvider`
-   - Calls `super.process()` — JWT Grant now succeeds because user + link exist
-
-### Service Loader Registration
-
-The SPI uses Java's `ServiceLoader` mechanism:
-
-```text
-META-INF/services/org.keycloak.protocol.oidc.grants.OAuth2GrantTypeFactory
-→ com.example.spi.JitJwtAuthorizationGrantTypeFactory
-```
-
-### Deployment
-
-In `start-dev` mode, Keycloak auto-discovers JARs in `/opt/keycloak/providers/`. The `docker-compose.spi.yml` override file mounts the SPI JAR into KC-B and KC-C (they receive JWT assertions). KC-A doesn't need the SPI (it only issues tokens).
-
-## Organizations and Username Namespacing
-
-### The Problem
-
-In a production scenario, KC-B and KC-C are operated by **different organizations**:
-
-1. **Cross-domain access**: KC-B cannot access KC-A's admin API to import users
-2. **Dynamic users**: KC-A adds/removes users over time
-3. **Username conflicts**: Both orgs might have a user "bob"
-4. **Diverse email domains**: The upstream org might be a social platform where users have @gmail.com, @yahoo.com, etc.
-
-### The Solution
-
-**Username namespacing** via the IDP username mapper template `${ALIAS}.${CLAIM.preferred_username}`:
-- KC-A user `bob` becomes `kc-a-idp.bob` in realm-b
-- KC-B user `kc-a-idp.bob` becomes `kc-b-idp.kc-a-idp.bob` in realm-c
-- Local KC-B user `bob` remains `bob` - no conflict
-
-**Organization membership** defined by origin IDP, not email domain:
-- Realm-B: Organization "kc-a-external-users" linked to `kc-a-idp`
-- Realm-C: Organization "kc-b-external-users" linked to `kc-b-idp`
-
-**Organization claims in tokens**:
-```json
-{
-  "organization": {
-    "<org-id>": {
-      "name": "kc-a-external-users"
-    }
-  }
-}
-```
-
-## Configuration
-
-All application configuration is in `app/src/main/resources/application.properties`.
-
-Key properties per profile:
-- `app.target-service-url` - URL of the downstream service to call
-- `app.target-kc-token-url` - Downstream KC's token endpoint for JWT Grant
-- `app.target-kc-client-id` - Client ID at the downstream KC
-- `app.target-kc-client-secret` - Client secret at the downstream KC
-
-## Token Exchange Flow (RFC 7523)
-
-The JWT Authorization Grant request:
-
-```http
-POST /realms/realm-b/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer
-&assertion={access_token_from_KC-A}
-&client_id=app-a-m2m-client
-&client_secret=app-a-m2m-secret
-&scope=openid organization
-```
-
-KC-B validates the assertion against the configured IDP (kc-a-idp) using KC-A's JWKS endpoint,
-resolves the user via the **federated identity link** (by `sub` UUID, not by username), and
-issues a local access token with organization membership claims.
-
-### Audience (`aud`) Claim Configuration
-
-RFC 7523 requires the assertion's `aud` claim to identify the receiving authorization server.
-Each upstream client includes an **audience protocol mapper** (`oidc-audience-mapper`)
-that adds the downstream KC's issuer URL to the access token's `aud` claim:
-
-| Upstream Client | Audience Added | Purpose |
-|----------------|----------------|---------|
-| `app-a-client` (realm-a) | `http://localhost:8280/realms/realm-b` | KC-A token accepted by KC-B |
-| `app-a-m2m-client` (realm-b) | `http://localhost:8380/realms/realm-c` | KC-B token accepted by KC-C |
-
-## Keycloak Features Enabled
-
-Each KC instance runs with:
-```bash
---features=token-exchange-standard:v2,jwt-authorization-grant:v1,organization
-```
-
-- **token-exchange-standard:v2** - RFC 8693 Standard Token Exchange (internal-to-internal, supported)
-- **jwt-authorization-grant:v1** - RFC 7523 JWT Authorization Grant (external-to-internal federation, preview)
-- **organization** - KC 26 Organizations for multi-tenancy and IDP-based user grouping
-
-## Test Suite
-
-The test suite supports both modes:
-
-```bash
-# Local testing
-./test.sh                      # Provisioning mode (default)
-./test.sh --mode provisioning  # Explicit provisioning mode
-./test.sh --mode spi           # SPI mode with JIT tests
-
-# OpenShift testing (uses Route URLs instead of localhost)
-./test.sh --openshift                # Provisioning mode on OpenShift
-./test.sh --mode spi --openshift     # SPI mode on OpenShift
-```
-
-**Core tests** (both modes, ~28 tests):
-- Infrastructure health checks (3 KCs + 3 apps)
-- KC-A token claims (audience, roles, username, email)
-- JWT Grant chain: KC-A → KC-B → KC-C (token claims, namespaced usernames, org claims)
-- Service chain: App-A → App-B → App-C (identity preservation)
-- Bob tests (JWT Grant + full chain)
-- UI tests (welcome page, OIDC redirect)
-
-**Provisioning-specific tests** (~3 tests):
-- Pre-existence verification of alice and bob in realm-b and realm-c
-
-**SPI-specific tests** (~15 tests):
-- Creates fresh user "charlie" in KC-A via admin API
-- Verifies charlie does NOT exist in realm-b before JWT Grant
-- JWT Grant triggers JIT creation in KC-B (namespaced username, org claim)
-- Admin API verification (user attributes: origin, email, firstName)
-- Organization membership verification via admin API
-- Idempotency test (second JWT Grant succeeds, no duplicate)
-- Full chain test: A→B→C with JIT at both hops (chained namespace `kc-b-idp.kc-a-idp.charlie`)
-
-## OpenShift Deployment
-
-Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.
-
-### Prerequisites
-
-- `oc` CLI logged into an OpenShift 4.x cluster
-- Sufficient quota for 6 pods + 3 build pods
-
-### Deploy
-
-```bash
-# Provisioning mode (default)
-./deploy-openshift.sh
-
-# SPI mode (JIT user creation)
-./deploy-openshift.sh --mode spi
-
-# Custom namespace
-./deploy-openshift.sh --namespace my-demo --mode spi
-```
-
-The script:
-1. Reads version info from `.env` (Keycloak, Java versions)
-2. Creates ImageStreams and BuildConfigs (substituting version placeholders), triggers builds from GitHub
-3. Creates Routes and discovers their hostnames
-4. Patches realm JSONs to replace localhost URLs with Route/Service URLs
-5. Creates ConfigMaps (non-sensitive config) and Secrets (credentials)
-6. Deploys all 6 components with proper env var overrides
-7. Runs a provisioning Job once Keycloak instances are ready
-
-All deployments include **topology annotations** (`app.openshift.io/vcs-uri`, `app.openshift.io/connects-to`) for the OpenShift Developer Console topology view, with direct links to Dev Spaces from each deployment.
-
-### Configuration
-
-All sensitive values (client secrets, admin credentials) are in **Secrets**. Non-sensitive config (URLs, feature flags) are in **ConfigMaps**.
-
-| Resource | Type | Contents |
-|----------|------|---------|
-| `kc-config` | ConfigMap | KC feature flags, proxy headers, health |
-| `kc-credentials` | Secret | KC admin username/password |
-| `kc-{a,b,c}-realm` | ConfigMap | Patched realm JSON for import |
-| `app-{a,b,c}-config` | ConfigMap | OIDC URLs, service URLs, client IDs |
-| `app-{a,b,c}-secrets` | Secret | OIDC client secrets, M2M client secrets |
-
-### URL Routing on OpenShift
-
-- **KC Routes** (kc-a, kc-b, kc-c): HTTPS with edge TLS — needed for browser OIDC flows, admin console, and issuer matching in JWT Grant
-- **App-A Route**: HTTPS with edge TLS — user-facing web UI
-- **App-B, App-C**: Internal ClusterIP Services only (pod-to-pod via `http://app-b:8080`)
-- **JWKS validation**: KC pods use internal Service URLs (`http://kc-a:8080`) for JWKS fetching
-
-### Cleanup
-
-```bash
-./undeploy-openshift.sh
-# or with namespace:
-./undeploy-openshift.sh --namespace my-demo
-```
-
-### Project Structure (OpenShift files)
-
-```
-openshift/
-├── imagestreams.yaml           # ImageStreams for built images
-├── buildconfigs.yaml           # BuildConfigs (Docker strategy from GitHub)
-├── kc-config.yaml              # Shared KC ConfigMap
-├── kc-secret.yaml              # KC admin credentials
-├── app-secrets.yaml            # App OIDC client secrets
-├── kc-{a,b,c}-deployment.yaml  # KC Deployments
-├── app-{a,b,c}-deployment.yaml # App Deployments
-├── services.yaml               # All 6 ClusterIP Services
-├── routes.yaml                 # Routes for KC-A, KC-B, KC-C, App-A
-└── provision-job-template.yaml # Provisioning Job (processed at deploy time)
-
-Containerfile.app               # Multi-stage Quarkus app build
-Containerfile.kc-spi            # KC image with SPI JAR (SPI mode)
-Containerfile.provision         # Provisioning Job image
-deploy-openshift.sh             # Deploy orchestration script
-undeploy-openshift.sh           # Cleanup script
-```
-
-## Dev Spaces
-
-The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-based IDE workspace pre-configured with all required tools.
-
-### Opening a Workspace
-
-- **From Topology view**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console
-- **From Dev Spaces dashboard**: Paste the Git repository URL
-
-### What's Included
-
-The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides:
-- Java 8/11/17/21 (via sdkman, defaulting to 21), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, `podman`
-
-### Available Commands (Command Palette)
-
-| # | Command | Description |
-|---|---------|-------------|
-| 01 | Build App | `./mvnw package -pl app -DskipTests` |
-| 02 | Build SPI | `./mvnw package -pl spi -DskipTests` |
-| 03 | Build All Modules | `./mvnw package -DskipTests` |
-| 04 | Run App-A | Quarkus dev mode, port 8081 |
-| 05 | Run App-B | Quarkus dev mode, port 8082 |
-| 06 | Run App-C | Quarkus dev mode, port 8083 |
-| 07 | Test (Provisioning) | `./test.sh --mode provisioning` |
-| 08 | Test (SPI) | `./test.sh --mode spi` |
-| 09 | Test (OpenShift) | `./test.sh --openshift` |
-| 10 | Deploy (Provisioning) | `./deploy-openshift.sh --mode provisioning` |
-| 11 | Deploy (SPI) | `./deploy-openshift.sh --mode spi` |
-| 12 | Provision Users | `./provision-users.sh` |
-| 13 | Provision Minimal | `./provision-minimal.sh` |
-
-## Local Cleanup
+### Local
 
 ```bash
 ./stop-keycloaks.sh
 ```
-
-### Recreating Keycloak Containers
 
 Keycloak only imports realm JSON files on **first startup** (when the data directory is empty). If you modify a realm JSON and want to re-import, you must fully remove the containers first:
 
@@ -513,6 +495,14 @@ Keycloak only imports realm JSON files on **first startup** (when the data direc
 ./stop-keycloaks.sh
 podman rm -f kc-a kc-b kc-c
 ./start-keycloaks.sh              # or: ./start-keycloaks.sh --mode spi
+```
+
+### OpenShift
+
+```bash
+./undeploy-openshift.sh
+# or with namespace:
+./undeploy-openshift.sh --namespace my-demo
 ```
 
 ## Troubleshooting
