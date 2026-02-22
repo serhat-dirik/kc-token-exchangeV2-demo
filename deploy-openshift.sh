@@ -224,8 +224,8 @@ oc label configmap app-c-config app=app-c app.kubernetes.io/part-of=kc-token-exc
 echo "  App ConfigMaps created."
 echo ""
 
-# ---- Step 7: Apply Secrets and Deployments ----
-echo "[7/9] Applying Secrets and Deployments..."
+# ---- Step 7: Apply Secrets and KC Deployments ----
+echo "[7/9] Applying Secrets and Keycloak Deployments..."
 oc apply -f "${OPENSHIFT_DIR}/kc-config.yaml"
 oc apply -f "${OPENSHIFT_DIR}/kc-secret.yaml"
 oc apply -f "${OPENSHIFT_DIR}/app-secrets.yaml"
@@ -240,45 +240,12 @@ for KC_INSTANCE in a b c; do
         "${DEPLOY_FILE}" | oc apply -f -
 done
 
-# Get the app image reference from the ImageStream
-APP_IMAGE=$(oc get istag kc-demo-app:latest -o jsonpath='{.image.dockerImageReference}' 2>/dev/null || echo "")
-if [[ -z "$APP_IMAGE" ]]; then
-    # Build may not be done yet; use the ImageStream tag reference
-    APP_IMAGE="kc-demo-app:latest"
-    echo "  NOTE: kc-demo-app build may still be in progress. Using ImageStream tag reference."
-fi
-
-# Apply app deployments with patched image
-for APP_INSTANCE in a b c; do
-    DEPLOY_FILE="${OPENSHIFT_DIR}/app-${APP_INSTANCE}-deployment.yaml"
-    sed "s|PLACEHOLDER_APP_IMAGE|${APP_IMAGE}|g" "${DEPLOY_FILE}" | oc apply -f -
-done
-
-echo "  Deployments applied."
+echo "  KC Deployments applied."
 echo ""
 
-# ---- Step 8: SPI mode - patch KC-B and KC-C images ----
-if [[ "$MODE" == "spi" ]]; then
-    echo "[8/9] SPI mode: patching KC-B and KC-C to use kc-spi image..."
+# ---- Step 8: Wait for builds, then apply App Deployments ----
+echo "[8/9] Waiting for builds and applying App Deployments..."
 
-    SPI_IMAGE=$(oc get istag kc-spi:latest -o jsonpath='{.image.dockerImageReference}' 2>/dev/null || echo "")
-    if [[ -z "$SPI_IMAGE" ]]; then
-        SPI_IMAGE="kc-spi:latest"
-        echo "  NOTE: kc-spi build may still be in progress. Using ImageStream tag reference."
-    fi
-
-    oc set image deployment/kc-b keycloak="${SPI_IMAGE}"
-    oc set image deployment/kc-c keycloak="${SPI_IMAGE}"
-    echo "  KC-B and KC-C patched to use kc-spi image."
-else
-    echo "[8/9] Provisioning mode: KC-B and KC-C use standard Keycloak image (no SPI)."
-fi
-echo ""
-
-# ---- Step 9: Wait for KC instances, then run provisioning Job ----
-echo "[9/9] Waiting for Keycloak instances to be ready before provisioning..."
-
-# Wait for all builds to complete first
 if [[ "$SKIP_BUILD" == "false" ]]; then
     echo "  Waiting for kc-demo-app build..."
     oc wait --for=condition=Complete build -l buildconfig=kc-demo-app --timeout=600s 2>/dev/null || true
@@ -290,11 +257,40 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
     fi
 fi
 
+# Apply app deployments — image.openshift.io/triggers annotation resolves the
+# ImageStreamTag to the full internal registry reference automatically.
+for APP_INSTANCE in a b c; do
+    DEPLOY_FILE="${OPENSHIFT_DIR}/app-${APP_INSTANCE}-deployment.yaml"
+    sed "s|PLACEHOLDER_APP_IMAGE|kc-demo-app:latest|g" "${DEPLOY_FILE}" | oc apply -f -
+done
+
+# SPI mode: patch KC-B and KC-C to use the custom SPI image
+if [[ "$MODE" == "spi" ]]; then
+    echo "  SPI mode: patching KC-B and KC-C to use kc-spi image..."
+    SPI_IMAGE=$(oc get istag kc-spi:latest -o jsonpath='{.image.dockerImageReference}' 2>/dev/null || echo "kc-spi:latest")
+    oc set image deployment/kc-b keycloak="${SPI_IMAGE}"
+    oc set image deployment/kc-c keycloak="${SPI_IMAGE}"
+    echo "  KC-B and KC-C patched to use kc-spi image."
+else
+    echo "  Provisioning mode: KC-B and KC-C use standard Keycloak image (no SPI)."
+fi
+
+echo "  App Deployments applied."
+echo ""
+
+# ---- Step 9: Wait for all deployments, then run provisioning Job ----
+echo "[9/9] Waiting for all instances to be ready before provisioning..."
+
 echo "  Waiting for KC deployments to be ready..."
 oc rollout status deployment/kc-a --timeout=300s
 oc rollout status deployment/kc-b --timeout=300s
 oc rollout status deployment/kc-c --timeout=300s
 echo "  All KC instances are ready."
+echo "  Waiting for App deployments to be ready..."
+oc rollout status deployment/app-a --timeout=300s
+oc rollout status deployment/app-b --timeout=300s
+oc rollout status deployment/app-c --timeout=300s
+echo "  All App instances are ready."
 echo ""
 
 # Get provision image
