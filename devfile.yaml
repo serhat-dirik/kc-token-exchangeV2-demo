@@ -4,7 +4,7 @@
 # Opens a fully configured workspace with Java 21, Maven, oc CLI, and all
 # the tools needed to develop, build, test, and deploy this demo.
 #
-# The Universal Developer Image (UDI) includes: Java 8/11/17/21 (sdkman),
+# The Universal Developer Image (UDI) includes: Java (multiple versions),
 # Maven, oc, kubectl, python3, curl, jq, podman, and git.
 #
 # Usage: Open this repo from the OpenShift Developer Console DevSpaces link,
@@ -64,6 +64,10 @@ components:
 
 # ---------------------------------------------------------------------------
 # Commands — numbered for clean ordering in the command palette
+#
+# Java discovery: The postStart hook finds Java 21 (system JDK or sdkman)
+# and writes JAVA_HOME to ~/.java21env. Each command sources this file
+# so JAVA_HOME and PATH are set correctly regardless of UDI image version.
 # ---------------------------------------------------------------------------
 commands:
   # ---- Workspace initialization (postStart event) ----
@@ -71,13 +75,32 @@ commands:
     exec:
       component: tools
       commandLine: >-
+        echo "--- Detecting Java 21 ---" &&
+        FOUND_JAVA="" &&
         if [ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
-          source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-          sdk default java 21.0 2>/dev/null ||
-          sdk default java 21 2>/dev/null ||
-          echo "WARN: Could not set Java 21 via sdkman";
+          source "$HOME/.sdkman/bin/sdkman-init.sh" 2>/dev/null &&
+          SDKMAN_JAVA=$(sdk home java 21 2>/dev/null || sdk home java 21.0 2>/dev/null || true) &&
+          if [ -n "$SDKMAN_JAVA" ] && [ -d "$SDKMAN_JAVA" ]; then FOUND_JAVA="$SDKMAN_JAVA"; fi;
         fi &&
-        java -version 2>&1 &&
+        if [ -z "$FOUND_JAVA" ]; then
+          for d in /usr/lib/jvm/java-21* /usr/lib/jvm/java-21-openjdk* /usr/lib/jvm/jre-21*; do
+            if [ -d "$d" ] && [ -x "$d/bin/java" ]; then FOUND_JAVA="$d"; break; fi;
+          done;
+        fi &&
+        if [ -z "$FOUND_JAVA" ]; then
+          FOUND_JAVA=$(dirname $(dirname $(readlink -f $(which java 2>/dev/null) || true)) 2>/dev/null || true);
+        fi &&
+        if [ -n "$FOUND_JAVA" ] && [ -d "$FOUND_JAVA" ]; then
+          echo "export JAVA_HOME=\"$FOUND_JAVA\"" > "$HOME/.java21env" &&
+          echo "export PATH=\"$FOUND_JAVA/bin:\$PATH\"" >> "$HOME/.java21env" &&
+          source "$HOME/.java21env" &&
+          echo "JAVA_HOME=$FOUND_JAVA" &&
+          java -version 2>&1;
+        else
+          echo "WARN: Could not find Java 21. Using system default." &&
+          echo "# no override needed" > "$HOME/.java21env" &&
+          java -version 2>&1 || echo "ERROR: No java found";
+        fi &&
         echo "Workspace ready."
       workingDir: ${PROJECT_SOURCE}
 
@@ -87,8 +110,7 @@ commands:
       label: "01: Build App"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw package -pl app -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -100,8 +122,7 @@ commands:
       label: "02: Build SPI"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw package -pl spi -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -112,8 +133,7 @@ commands:
       label: "03: Build All Modules"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw package -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -125,8 +145,7 @@ commands:
       label: "04: Run App-A (UI, port 8081)"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-a -Ddebug=5005
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -138,8 +157,7 @@ commands:
       label: "05: Run App-B (Service, port 8082)"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-b -Ddebug=5006
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -150,8 +168,7 @@ commands:
       label: "06: Run App-C (Terminal, port 8083)"
       component: tools
       commandLine: >-
-        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
-        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        [ -f "$HOME/.java21env" ] && source "$HOME/.java21env";
         ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-c -Ddebug=5007
       workingDir: ${PROJECT_SOURCE}
       group:
@@ -222,7 +239,7 @@ commands:
       workingDir: ${PROJECT_SOURCE}
 
 # ---------------------------------------------------------------------------
-# Events — set Java 21 as default when workspace starts
+# Events — detect Java 21 and write env file when workspace starts
 # ---------------------------------------------------------------------------
 events:
   postStart:
