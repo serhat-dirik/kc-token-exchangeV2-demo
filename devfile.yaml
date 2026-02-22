@@ -8,7 +8,7 @@
 # Maven, oc, kubectl, python3, curl, jq, and git.
 #
 # Workflow (DevSpaces → OpenShift):
-#   01: Build Apps  →  02/03: Deploy KC  →  04: Deploy Apps  →  05/06: Test  →  07: Clean
+#   01: Build  →  02/03: Deploy to OpenShift  →  04/05: Test  →  06: Clean
 #
 # Usage: Open this repo from the OpenShift Developer Console DevSpaces link,
 #        or paste the Git URL into the DevSpaces dashboard.
@@ -120,9 +120,9 @@ commands:
         kind: build
         isDefault: true
 
-  - id: deploy-kc-provisioning
+  - id: deploy-provisioning
     exec:
-      label: "02: Deploy KC to OpenShift — Provisioning Mode"
+      label: "02: Deploy to OpenShift — Provisioning Mode"
       component: tools
       commandLine: ./deploy-openshift.sh --mode provisioning
       workingDir: ${PROJECT_SOURCE}
@@ -130,35 +130,18 @@ commands:
         kind: deploy
         isDefault: true
 
-  - id: deploy-kc-spi
+  - id: deploy-spi
     exec:
-      label: "03: Deploy KC to OpenShift — SPI Mode"
+      label: "03: Deploy to OpenShift — SPI Mode"
       component: tools
       commandLine: ./deploy-openshift.sh --mode spi
       workingDir: ${PROJECT_SOURCE}
       group:
         kind: deploy
 
-  - id: deploy-apps
+  - id: test-provisioning
     exec:
-      label: "04: Deploy Apps to OpenShift"
-      component: tools
-      commandLine: >-
-        echo "--- Redeploying App pods (rolling restart) ---" &&
-        oc rollout restart deployment/app-a &&
-        oc rollout restart deployment/app-b &&
-        oc rollout restart deployment/app-c &&
-        oc rollout status deployment/app-a --timeout=300s &&
-        oc rollout status deployment/app-b --timeout=300s &&
-        oc rollout status deployment/app-c --timeout=300s &&
-        echo "All App pods restarted."
-      workingDir: ${PROJECT_SOURCE}
-      group:
-        kind: deploy
-
-  - id: test-provisioning-ocp
-    exec:
-      label: "05: Test — Provisioning Mode (OpenShift)"
+      label: "04: Test — Provisioning Mode (OpenShift)"
       component: tools
       commandLine: ./test.sh --mode provisioning --openshift
       workingDir: ${PROJECT_SOURCE}
@@ -166,18 +149,18 @@ commands:
         kind: test
         isDefault: true
 
-  - id: test-spi-ocp
+  - id: test-spi
     exec:
-      label: "06: Test — SPI Mode (OpenShift)"
+      label: "05: Test — SPI Mode (OpenShift)"
       component: tools
       commandLine: ./test.sh --mode spi --openshift
       workingDir: ${PROJECT_SOURCE}
       group:
         kind: test
 
-  - id: clean-ocp
+  - id: clean-namespace
     exec:
-      label: "07: Clean OpenShift Namespace"
+      label: "06: Clean OpenShift Namespace"
       component: tools
       commandLine: ./undeploy-openshift.sh
       workingDir: ${PROJECT_SOURCE}

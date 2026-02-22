@@ -273,19 +273,46 @@ The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-b
 
 The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java (multiple versions), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `git`.
 
-### Available Commands (Command Palette)
+### Build
+
+Build all modules (app + SPI) from the workspace terminal:
+
+```bash
+./mvnw package -DskipTests           # Build everything
+./mvnw package -pl app -DskipTests   # Build only the Quarkus app
+./mvnw package -pl spi -DskipTests   # Build only the SPI module
+```
+
+### Deploy to OpenShift
+
+From the workspace terminal, deploy the full demo (3 Keycloak + 3 Quarkus apps) to the current OpenShift namespace:
+
+```bash
+./deploy-openshift.sh --mode provisioning   # Pre-provisioned users
+./deploy-openshift.sh --mode spi            # JIT user creation via SPI
+
+# Test
+./test.sh --mode provisioning --openshift
+./test.sh --mode spi --openshift
+
+# Cleanup
+./undeploy-openshift.sh
+```
+
+### Command Palette Tasks
+
+All of the above are also available as numbered tasks in the command palette (`F1` → "Run Task"):
 
 | # | Command | Description |
 |---|---------|-------------|
 | 01 | Build Apps | `./mvnw package -DskipTests` |
-| 02 | Deploy KC — Provisioning | Full deploy with pre-provisioned users |
-| 03 | Deploy KC — SPI Mode | Full deploy with JIT user creation |
-| 04 | Deploy Apps | Rolling restart of App-A/B/C pods |
-| 05 | Test — Provisioning (OpenShift) | `./test.sh --mode provisioning --openshift` |
-| 06 | Test — SPI (OpenShift) | `./test.sh --mode spi --openshift` |
-| 07 | Clean OpenShift Namespace | `./undeploy-openshift.sh` |
+| 02 | Deploy to OpenShift — Provisioning | Full deploy with pre-provisioned users |
+| 03 | Deploy to OpenShift — SPI Mode | Full deploy with JIT user creation |
+| 04 | Test — Provisioning (OpenShift) | `./test.sh --mode provisioning --openshift` |
+| 05 | Test — SPI (OpenShift) | `./test.sh --mode spi --openshift` |
+| 06 | Clean OpenShift Namespace | `./undeploy-openshift.sh` |
 
-> **Note:** Local commands (`start-keycloaks.sh`, `run-app-*.sh`) are for local development with podman-compose. In Dev Spaces, use the OpenShift workflow above.
+> **Note:** Local commands (`start-keycloaks.sh`, `run-app-*.sh`) are for local development with podman-compose and won't work inside Dev Spaces.
 
 ## Version Management
 
