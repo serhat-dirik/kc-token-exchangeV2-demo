@@ -98,6 +98,7 @@ The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automaticall
 - Java 21+
 - Podman (or Docker) with podman-compose
 - Maven (included via wrapper)
+- `oc` CLI (for OpenShift deployment)
 
 ## Quick Start
 
@@ -134,6 +135,24 @@ The `kc-jit-jwt-grant-spi` plugin intercepts JWT Grant requests and automaticall
 ./test.sh --mode spi
 ```
 
+### Version Management
+
+All dependency versions are centralized in the `.env` file:
+
+```bash
+KEYCLOAK_VERSION=26.5.3
+QUARKUS_VERSION=3.20.3
+JAVA_VERSION=21
+```
+
+These values propagate automatically to:
+- `docker-compose.yml` — Keycloak container image tags
+- `Containerfile.app` / `Containerfile.kc-spi` — Java builder/runtime image tags (via `ARG`)
+- `deploy-openshift.sh` — OpenShift BuildConfig build args and KC deployment images
+- `openshift/buildconfigs.yaml` and `openshift/kc-*-deployment.yaml` — placeholder substitution at deploy time
+
+> **Note:** `pom.xml` properties (`<keycloak.version>`, `<quarkus.platform.version>`, `<maven.compiler.release>`) must be updated manually to match.
+
 ### Manual Testing
 
 1. Open http://localhost:8081
@@ -159,6 +178,8 @@ In SPI mode, the tests also create a `charlie` user dynamically to verify JIT pr
 kc-token-exchangeV2-demo/
 ├── pom.xml                          # Parent POM (multi-module)
 ├── README.md
+├── .env                             # Centralized version config (KC, Java, Quarkus)
+├── devfile.yaml                     # OpenShift Dev Spaces workspace definition
 │
 ├── app/                             # Quarkus application (UI + services)
 │   ├── pom.xml
@@ -334,9 +355,14 @@ Each KC instance runs with:
 The test suite supports both modes:
 
 ```bash
+# Local testing
 ./test.sh                      # Provisioning mode (default)
 ./test.sh --mode provisioning  # Explicit provisioning mode
 ./test.sh --mode spi           # SPI mode with JIT tests
+
+# OpenShift testing (uses Route URLs instead of localhost)
+./test.sh --openshift                # Provisioning mode on OpenShift
+./test.sh --mode spi --openshift     # SPI mode on OpenShift
 ```
 
 **Core tests** (both modes, ~28 tests):
@@ -382,12 +408,15 @@ Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on t
 ```
 
 The script:
-1. Creates ImageStreams and BuildConfigs, triggers builds from GitHub
-2. Creates Routes and discovers their hostnames
-3. Patches realm JSONs to replace localhost URLs with Route/Service URLs
-4. Creates ConfigMaps (non-sensitive config) and Secrets (credentials)
-5. Deploys all 6 components with proper env var overrides
-6. Runs a provisioning Job once Keycloak instances are ready
+1. Reads version info from `.env` (Keycloak, Java versions)
+2. Creates ImageStreams and BuildConfigs (substituting version placeholders), triggers builds from GitHub
+3. Creates Routes and discovers their hostnames
+4. Patches realm JSONs to replace localhost URLs with Route/Service URLs
+5. Creates ConfigMaps (non-sensitive config) and Secrets (credentials)
+6. Deploys all 6 components with proper env var overrides
+7. Runs a provisioning Job once Keycloak instances are ready
+
+All deployments include **topology annotations** (`app.openshift.io/vcs-uri`, `app.openshift.io/connects-to`) for the OpenShift Developer Console topology view, with direct links to Dev Spaces from each deployment.
 
 ### Configuration
 
@@ -437,6 +466,38 @@ Containerfile.provision         # Provisioning Job image
 deploy-openshift.sh             # Deploy orchestration script
 undeploy-openshift.sh           # Cleanup script
 ```
+
+## Dev Spaces
+
+The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-based IDE workspace pre-configured with all required tools.
+
+### Opening a Workspace
+
+- **From Topology view**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console
+- **From Dev Spaces dashboard**: Paste the Git repository URL
+
+### What's Included
+
+The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides:
+- Java 8/11/17/21 (via sdkman, defaulting to 21), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, `podman`
+
+### Available Commands (Command Palette)
+
+| # | Command | Description |
+|---|---------|-------------|
+| 01 | Build App | `./mvnw package -pl app -DskipTests` |
+| 02 | Build SPI | `./mvnw package -pl spi -DskipTests` |
+| 03 | Build All Modules | `./mvnw package -DskipTests` |
+| 04 | Run App-A | Quarkus dev mode, port 8081 |
+| 05 | Run App-B | Quarkus dev mode, port 8082 |
+| 06 | Run App-C | Quarkus dev mode, port 8083 |
+| 07 | Test (Provisioning) | `./test.sh --mode provisioning` |
+| 08 | Test (SPI) | `./test.sh --mode spi` |
+| 09 | Test (OpenShift) | `./test.sh --openshift` |
+| 10 | Deploy (Provisioning) | `./deploy-openshift.sh --mode provisioning` |
+| 11 | Deploy (SPI) | `./deploy-openshift.sh --mode spi` |
+| 12 | Provision Users | `./provision-users.sh` |
+| 13 | Provision Minimal | `./provision-minimal.sh` |
 
 ## Local Cleanup
 
