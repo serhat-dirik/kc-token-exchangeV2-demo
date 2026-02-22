@@ -271,28 +271,21 @@ The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-b
 
 **Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.
 
-The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java 8/11/17/21 (via sdkman, defaulting to 21), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `podman`.
+The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java (multiple versions), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `git`.
 
 ### Available Commands (Command Palette)
 
 | # | Command | Description |
 |---|---------|-------------|
-| 01 | Build App | `./mvnw package -pl app -DskipTests` |
-| 02 | Build SPI | `./mvnw package -pl spi -DskipTests` |
-| 03 | Build All Modules | `./mvnw package -DskipTests` |
-| 04 | Run App-A | Quarkus dev mode, port 8081 |
-| 05 | Run App-B | Quarkus dev mode, port 8082 |
-| 06 | Run App-C | Quarkus dev mode, port 8083 |
-| 07 | Test (Provisioning) | `./test.sh --mode provisioning` |
-| 08 | Test (SPI) | `./test.sh --mode spi` |
-| 09 | Test (OpenShift) | `./test.sh --openshift` |
-| 10 | Deploy (Provisioning) | `./deploy-openshift.sh --mode provisioning` |
-| 11 | Deploy (SPI) | `./deploy-openshift.sh --mode spi` |
-| 12 | Provision Users | `./provision-users.sh` |
-| 13 | Provision Minimal | `./provision-minimal.sh` |
-| 14 | Undeploy from OpenShift | `./undeploy-openshift.sh` |
+| 01 | Build Apps | `./mvnw package -DskipTests` |
+| 02 | Deploy KC — Provisioning | Full deploy with pre-provisioned users |
+| 03 | Deploy KC — SPI Mode | Full deploy with JIT user creation |
+| 04 | Deploy Apps | Rolling restart of App-A/B/C pods |
+| 05 | Test — Provisioning (OpenShift) | `./test.sh --mode provisioning --openshift` |
+| 06 | Test — SPI (OpenShift) | `./test.sh --mode spi --openshift` |
+| 07 | Clean OpenShift Namespace | `./undeploy-openshift.sh` |
 
-> **Note:** Local Keycloak commands (`start-keycloaks.sh`, `stop-keycloaks.sh`) are for local development with podman-compose only. In Dev Spaces, use the OpenShift deploy/undeploy commands (10, 11, 14) instead.
+> **Note:** Local commands (`start-keycloaks.sh`, `run-app-*.sh`) are for local development with podman-compose. In Dev Spaces, use the OpenShift workflow above.
 
 ## Version Management
 
