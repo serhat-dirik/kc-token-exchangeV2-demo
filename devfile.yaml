@@ -101,6 +101,8 @@ commands:
           echo "# no override needed" > "$HOME/.java21env" &&
           java -version 2>&1 || echo "ERROR: No java found";
         fi &&
+        echo "--- Installing podman-compose ---" &&
+        pip install podman-compose 2>/dev/null || pip3 install podman-compose 2>/dev/null || echo "WARN: Could not install podman-compose" &&
         echo "Workspace ready."
       workingDir: ${PROJECT_SOURCE}
 
@@ -238,8 +240,30 @@ commands:
       commandLine: ./provision-minimal.sh
       workingDir: ${PROJECT_SOURCE}
 
+  # ---- Local Keycloak (requires podman-compose, installed in postStart) ----
+  - id: start-keycloaks
+    exec:
+      label: "14: Start Keycloaks (Local)"
+      component: tools
+      commandLine: ./start-keycloaks.sh
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: start-keycloaks-spi
+    exec:
+      label: "15: Start Keycloaks — SPI Mode (Local)"
+      component: tools
+      commandLine: ./start-keycloaks.sh --mode spi
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: stop-keycloaks
+    exec:
+      label: "16: Stop Keycloaks (Local)"
+      component: tools
+      commandLine: ./stop-keycloaks.sh
+      workingDir: ${PROJECT_SOURCE}
+
 # ---------------------------------------------------------------------------
-# Events — detect Java 21 and write env file when workspace starts
+# Events — detect Java 21, install podman-compose when workspace starts
 # ---------------------------------------------------------------------------
 events:
   postStart:
