@@ -1,0 +1,220 @@
+# =============================================================================
+# DevSpaces Devfile — KC Token Exchange V2 Demo
+#
+# Opens a fully configured workspace with Java 21, Maven, oc CLI, and all
+# the tools needed to develop, build, test, and deploy this demo.
+#
+# The Universal Developer Image (UDI) includes: Java 8/11/17/21 (sdkman),
+# Maven, oc, kubectl, python3, curl, jq, podman, and git.
+#
+# Usage: Open this repo from the OpenShift Developer Console DevSpaces link,
+#        or paste the Git URL into the DevSpaces dashboard.
+# =============================================================================
+schemaVersion: 2.2.2
+metadata:
+  name: kc-token-exchange-v2-demo
+  version: 1.0.0
+  displayName: KC Token Exchange V2 Demo
+  description: >-
+    Keycloak Token Exchange V2 (RFC 7523 JWT Authorization Grant) demo
+    with Organizations — multi-realm, multi-app service chaining.
+  icon: https://www.keycloak.org/resources/images/icon.svg
+  tags:
+    - Java
+    - Quarkus
+    - Keycloak
+    - OpenShift
+  projectType: Quarkus
+  language: Java
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+components:
+  - name: tools
+    container:
+      image: registry.redhat.io/devspaces/udi-rhel8:latest
+      memoryLimit: 6Gi
+      memoryRequest: 1Gi
+      cpuLimit: "2"
+      cpuRequest: 200m
+      mountSources: true
+      env:
+        # UDI ships Java 8/11/17/21 via sdkman — select 21 as default
+        - name: JAVA_HOME
+          value: /home/user/.sdkman/candidates/java/current
+      endpoints:
+        # --- Quarkus App endpoints ---
+        - name: app-a
+          targetPort: 8081
+          exposure: public
+          protocol: https
+        - name: app-b
+          targetPort: 8082
+          exposure: internal
+        - name: app-c
+          targetPort: 8083
+          exposure: internal
+        # --- JDWP debug ports ---
+        - name: debug-app-a
+          targetPort: 5005
+          exposure: internal
+        - name: debug-app-b
+          targetPort: 5006
+          exposure: internal
+        - name: debug-app-c
+          targetPort: 5007
+          exposure: internal
+
+# ---------------------------------------------------------------------------
+# Commands — numbered for clean ordering in the command palette
+# ---------------------------------------------------------------------------
+commands:
+  # ---- Workspace initialization (postStart event) ----
+  - id: set-java-21
+    exec:
+      component: tools
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        sdk default java 21 &&
+        java -version &&
+        echo "Java 21 configured. Ready to develop!"
+      workingDir: ${PROJECT_SOURCE}
+
+  # ---- Build ----
+  - id: build-app
+    exec:
+      label: "01: Build App"
+      component: tools
+      commandLine: ./mvnw package -pl app -DskipTests
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: build
+        isDefault: true
+
+  - id: build-spi
+    exec:
+      label: "02: Build SPI"
+      component: tools
+      commandLine: ./mvnw package -pl spi -DskipTests
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: build
+
+  - id: build-all
+    exec:
+      label: "03: Build All Modules"
+      component: tools
+      commandLine: ./mvnw package -DskipTests
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: build
+
+  # ---- Run (each app in its own terminal) ----
+  - id: run-app-a
+    exec:
+      label: "04: Run App-A (UI, port 8081)"
+      component: tools
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        sdk use java 21 &&
+        ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-a -Ddebug=5005
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: run
+        isDefault: true
+
+  - id: run-app-b
+    exec:
+      label: "05: Run App-B (Service, port 8082)"
+      component: tools
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        sdk use java 21 &&
+        ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-b -Ddebug=5006
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: run
+
+  - id: run-app-c
+    exec:
+      label: "06: Run App-C (Terminal, port 8083)"
+      component: tools
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        sdk use java 21 &&
+        ./mvnw quarkus:dev -pl app -Dquarkus.profile=app-c -Ddebug=5007
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: run
+
+  # ---- Test ----
+  - id: test-provisioning
+    exec:
+      label: "07: Test (Provisioning Mode)"
+      component: tools
+      commandLine: ./test.sh --mode provisioning
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: test
+        isDefault: true
+
+  - id: test-spi
+    exec:
+      label: "08: Test (SPI Mode)"
+      component: tools
+      commandLine: ./test.sh --mode spi
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: test
+
+  - id: test-openshift
+    exec:
+      label: "09: Test (OpenShift)"
+      component: tools
+      commandLine: ./test.sh --openshift
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: test
+
+  # ---- Deploy to OpenShift ----
+  - id: deploy-provisioning
+    exec:
+      label: "10: Deploy to OpenShift (Provisioning)"
+      component: tools
+      commandLine: ./deploy-openshift.sh --mode provisioning
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: deploy
+        isDefault: true
+
+  - id: deploy-spi
+    exec:
+      label: "11: Deploy to OpenShift (SPI)"
+      component: tools
+      commandLine: ./deploy-openshift.sh --mode spi
+      workingDir: ${PROJECT_SOURCE}
+      group:
+        kind: deploy
+
+  # ---- Provisioning (local Keycloak) ----
+  - id: provision-users
+    exec:
+      label: "12: Provision Users (Full)"
+      component: tools
+      commandLine: ./provision-users.sh
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: provision-minimal
+    exec:
+      label: "13: Provision Minimal (SPI Mode)"
+      component: tools
+      commandLine: ./provision-minimal.sh
+      workingDir: ${PROJECT_SOURCE}
+
+# ---------------------------------------------------------------------------
+# Events — set Java 21 as default when workspace starts
+# ---------------------------------------------------------------------------
+events:
+  postStart:
+    - set-java-21
