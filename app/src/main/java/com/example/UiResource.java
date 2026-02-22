@@ -162,35 +162,57 @@ public class UiResource {
                 textOrDefault(node, "downstreamError", null)
         ));
 
-        // Recursively parse nested downstream response (it's a JSON string)
+        // Recursively parse nested downstream response.
+        // It may be a JSON string (raw response from callService) or already an object
+        // (if the pretty-printer already expanded it).
         JsonNode downstream = node.get("downstreamResponse");
-        if (downstream != null && downstream.isTextual()) {
-            String dsText = downstream.asText();
-            if (dsText.trim().startsWith("{")) {
-                try {
-                    JsonNode nested = mapper.readTree(dsText);
-                    addHop(hops, nested, mapper);
-                } catch (Exception ignored) {}
+        if (downstream != null) {
+            if (downstream.isTextual()) {
+                String dsText = downstream.asText();
+                if (dsText.trim().startsWith("{")) {
+                    try {
+                        JsonNode nested = mapper.readTree(dsText);
+                        addHop(hops, nested, mapper);
+                    } catch (Exception ignored) {}
+                }
+            } else if (downstream.isObject()) {
+                addHop(hops, downstream, mapper);
             }
         }
     }
 
     /**
      * Extracts the organization name from the KC 26 organization claim.
-     * KC 26 can emit the claim in different formats:
-     *   - Array: ["org-name-1", "org-name-2"]
-     *   - Object: {"<org-id>": {"name": "Org Name"}}
+     * Handles multiple formats:
+     *   - String array: ["kc-a-external-users"]  (after API fix)
+     *   - Object array: [{"string":"org-name","chars":"org-name","valueType":"STRING"}]  (legacy JsonValue leak)
+     *   - Object map: {"<org-id>": {"name": "Org Name"}}  (KC admin API format)
+     *   - Simple string: "org-name"
      */
     private String extractOrgName(JsonNode node) {
         JsonNode org = node.get("organization");
         if (org == null || org.isNull()) return null;
 
-        // Array format: ["kc-a-external-users"]
+        // Array format
         if (org.isArray() && !org.isEmpty()) {
-            return org.get(0).asText();
+            JsonNode first = org.get(0);
+            // Clean string: ["kc-a-external-users"]
+            if (first.isTextual()) {
+                return first.asText();
+            }
+            // Legacy JsonValue object: [{"string":"org-name", ...}]
+            if (first.isObject() && first.has("string")) {
+                return first.get("string").asText();
+            }
+            return first.asText();
         }
 
-        // Object format: {"<org-id>": {"name": "Org Name"}}
+        // Simple string
+        if (org.isTextual()) {
+            return org.asText();
+        }
+
+        // Object map format: {"<org-id>": {"name": "Org Name"}}
         if (org.isObject()) {
             var fields = org.fields();
             if (fields.hasNext()) {
