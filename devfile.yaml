@@ -39,10 +39,6 @@ components:
       cpuLimit: "2"
       cpuRequest: 200m
       mountSources: true
-      env:
-        # UDI ships Java 8/11/17/21 via sdkman — select 21 as default
-        - name: JAVA_HOME
-          value: /home/user/.sdkman/candidates/java/current
       endpoints:
         # --- Quarkus App endpoints ---
         - name: app-a
@@ -90,7 +86,10 @@ commands:
     exec:
       label: "01: Build App"
       component: tools
-      commandLine: ./mvnw package -pl app -DskipTests
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        ./mvnw package -pl app -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
         kind: build
@@ -100,7 +99,10 @@ commands:
     exec:
       label: "02: Build SPI"
       component: tools
-      commandLine: ./mvnw package -pl spi -DskipTests
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        ./mvnw package -pl spi -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
         kind: build
@@ -109,7 +111,10 @@ commands:
     exec:
       label: "03: Build All Modules"
       component: tools
-      commandLine: ./mvnw package -DskipTests
+      commandLine: >-
+        source "$HOME/.sdkman/bin/sdkman-init.sh" &&
+        (sdk use java 21.0 2>/dev/null || sdk use java 21 2>/dev/null || true) &&
+        ./mvnw package -DskipTests
       workingDir: ${PROJECT_SOURCE}
       group:
         kind: build
