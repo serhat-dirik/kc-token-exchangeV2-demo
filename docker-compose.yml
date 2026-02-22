@@ -9,7 +9,7 @@
 
 services:
   kc-a:
-    image: quay.io/keycloak/keycloak:26.5.3
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.5.3}
     container_name: kc-a
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -30,7 +30,7 @@ services:
       retries: 15
 
   kc-b:
-    image: quay.io/keycloak/keycloak:26.5.3
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.5.3}
     container_name: kc-b
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -51,7 +51,7 @@ services:
       retries: 15
 
   kc-c:
-    image: quay.io/keycloak/keycloak:26.5.3
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.5.3}
     container_name: kc-c
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin

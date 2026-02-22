@@ -1,0 +1,16 @@
+.gitignore
+.DS_Store
+target/
+app/target/
+spi/target/
+.idea/
+*.iml
+.settings/
+.project
+.classpath
+.vscode/
+*.class
+*.jar
+*.log
+.claude/
+docs/plans/

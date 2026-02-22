@@ -1,6 +1,9 @@
 # =============================================================================
 # BuildConfigs for the KC Token Exchange V2 demo
 # All builds pull source from GitHub and use Docker strategy with Containerfiles.
+#
+# PLACEHOLDER_JAVA_VERSION and PLACEHOLDER_KEYCLOAK_VERSION are replaced by
+# deploy-openshift.sh with the values from .env before applying.
 # =============================================================================
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
@@ -18,6 +21,9 @@ spec:
     type: Docker
     dockerStrategy:
       dockerfilePath: Containerfile.app
+      buildArgs:
+      - name: JAVA_VERSION
+        value: "PLACEHOLDER_JAVA_VERSION"
   output:
     to:
       kind: ImageStreamTag
@@ -46,6 +52,11 @@ spec:
     type: Docker
     dockerStrategy:
       dockerfilePath: Containerfile.kc-spi
+      buildArgs:
+      - name: JAVA_VERSION
+        value: "PLACEHOLDER_JAVA_VERSION"
+      - name: KEYCLOAK_VERSION
+        value: "PLACEHOLDER_KEYCLOAK_VERSION"
   output:
     to:
       kind: ImageStreamTag

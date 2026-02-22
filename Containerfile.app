@@ -4,16 +4,21 @@
 #
 # Stage 1: Build the fast-jar using Maven wrapper
 # Stage 2: Minimal runtime image with the built artifact
+#
+# Build args (defaults match .env):
+#   JAVA_VERSION — UBI OpenJDK version (e.g. 21, 17)
 # =============================================================================
 
+ARG JAVA_VERSION=21
+
 # Stage 1: Build
-FROM registry.access.redhat.com/ubi9/openjdk-21:latest AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-${JAVA_VERSION}:latest AS builder
 WORKDIR /build
 COPY --chown=185 . .
 RUN ./mvnw package -pl app -DskipTests -Dquarkus.package.jar.type=fast-jar
 
 # Stage 2: Runtime
-FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
+FROM registry.access.redhat.com/ubi9/openjdk-${JAVA_VERSION}-runtime:latest
 ENV LANGUAGE='en_US:en'
 COPY --from=builder --chown=185 /build/app/target/quarkus-app/lib/ /deployments/lib/
 COPY --from=builder --chown=185 /build/app/target/quarkus-app/*.jar /deployments/

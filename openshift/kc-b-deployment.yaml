@@ -3,6 +3,7 @@
 # Trusts KC-A as an external IDP. Receives JWT grants from App-A's M2M client.
 # In SPI mode, deploy-openshift.sh patches the image to use the kc-spi ImageStream.
 # KC_HOSTNAME_URL placeholder is replaced by deploy-openshift.sh with the Route URL.
+# PLACEHOLDER_KC_IMAGE is replaced with the Keycloak version from .env.
 # =============================================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -30,7 +31,7 @@ spec:
     spec:
       containers:
       - name: keycloak
-        image: quay.io/keycloak/keycloak:26.5.3
+        image: PLACEHOLDER_KC_IMAGE
         args: ["start-dev", "--import-realm"]
         ports:
         - containerPort: 8080

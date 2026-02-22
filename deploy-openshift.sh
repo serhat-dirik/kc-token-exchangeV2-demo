@@ -66,9 +66,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OPENSHIFT_DIR="${SCRIPT_DIR}/openshift"
 REALM_DIR="${SCRIPT_DIR}/keycloak/realms"
 
+# ---- Load centralized versions from .env ----
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+    # shellcheck source=.env
+    source "${SCRIPT_DIR}/.env"
+fi
+KEYCLOAK_VERSION="${KEYCLOAK_VERSION:-26.5.3}"
+JAVA_VERSION="${JAVA_VERSION:-21}"
+KC_IMAGE="quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}"
+
 echo "=============================================="
 echo " KC Token Exchange V2 Demo - OpenShift Deploy"
 echo " Mode: ${MODE}"
+echo " Keycloak: ${KEYCLOAK_VERSION}  |  Java: ${JAVA_VERSION}"
 echo "=============================================="
 echo ""
 
@@ -85,7 +95,9 @@ echo ""
 # ---- Step 2: ImageStreams + BuildConfigs ----
 echo "[2/9] Applying ImageStreams and BuildConfigs..."
 oc apply -f "${OPENSHIFT_DIR}/imagestreams.yaml"
-oc apply -f "${OPENSHIFT_DIR}/buildconfigs.yaml"
+sed -e "s|PLACEHOLDER_JAVA_VERSION|${JAVA_VERSION}|g" \
+    -e "s|PLACEHOLDER_KEYCLOAK_VERSION|${KEYCLOAK_VERSION}|g" \
+    "${OPENSHIFT_DIR}/buildconfigs.yaml" | oc apply -f -
 
 if [[ "$SKIP_BUILD" == "false" ]]; then
     echo "  Starting builds..."
@@ -230,13 +242,14 @@ oc apply -f "${OPENSHIFT_DIR}/kc-config.yaml"
 oc apply -f "${OPENSHIFT_DIR}/kc-secret.yaml"
 oc apply -f "${OPENSHIFT_DIR}/app-secrets.yaml"
 
-# Patch KC deployments with actual Route URLs
+# Patch KC deployments with actual Route URLs and Keycloak image version
 for KC_INSTANCE in a b c; do
     DEPLOY_FILE="${OPENSHIFT_DIR}/kc-${KC_INSTANCE}-deployment.yaml"
     ROUTE_VAR="KC_$(echo ${KC_INSTANCE} | tr '[:lower:]' '[:upper:]')_ROUTE"
     ROUTE_URL="${!ROUTE_VAR}"
 
-    sed "s|PLACEHOLDER_KC_$(echo ${KC_INSTANCE} | tr '[:lower:]' '[:upper:]')_ROUTE|${ROUTE_URL}|g" \
+    sed -e "s|PLACEHOLDER_KC_$(echo ${KC_INSTANCE} | tr '[:lower:]' '[:upper:]')_ROUTE|${ROUTE_URL}|g" \
+        -e "s|PLACEHOLDER_KC_IMAGE|${KC_IMAGE}|g" \
         "${DEPLOY_FILE}" | oc apply -f -
 done
 

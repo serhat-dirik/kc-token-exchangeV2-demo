@@ -2,6 +2,7 @@
 # KC-A Deployment — User-facing IDP (realm-a)
 # The source of truth for users (alice, bob). Issues tokens consumed by App-A.
 # KC_HOSTNAME_URL placeholder is replaced by deploy-openshift.sh with the Route URL.
+# PLACEHOLDER_KC_IMAGE is replaced with the Keycloak version from .env.
 # =============================================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -28,7 +29,7 @@ spec:
     spec:
       containers:
       - name: keycloak
-        image: quay.io/keycloak/keycloak:26.5.3
+        image: PLACEHOLDER_KC_IMAGE
         args: ["start-dev", "--import-realm"]
         ports:
         - containerPort: 8080

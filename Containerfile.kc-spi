@@ -7,14 +7,21 @@
 #
 # This image is used for KC-B and KC-C in SPI mode.
 # KC-A does NOT need this — it only issues tokens, never receives JWT grants.
+#
+# Build args (defaults match .env):
+#   JAVA_VERSION     — UBI OpenJDK version for the builder stage
+#   KEYCLOAK_VERSION — Keycloak image tag for the runtime stage
 # =============================================================================
 
+ARG JAVA_VERSION=21
+ARG KEYCLOAK_VERSION=26.5.3
+
 # Stage 1: Build the SPI JAR
-FROM registry.access.redhat.com/ubi9/openjdk-21:latest AS builder
+FROM registry.access.redhat.com/ubi9/openjdk-${JAVA_VERSION}:latest AS builder
 WORKDIR /build
 COPY --chown=185 . .
 RUN ./mvnw package -pl spi -DskipTests
 
 # Stage 2: Keycloak with SPI
-FROM quay.io/keycloak/keycloak:26.5.3
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}
 COPY --from=builder /build/spi/target/kc-jit-jwt-grant-spi-1.0.0-SNAPSHOT.jar /opt/keycloak/providers/kc-jit-jwt-grant-spi.jar
