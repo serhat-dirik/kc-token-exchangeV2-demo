@@ -290,6 +290,9 @@ The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provid
 | 11 | Deploy (SPI) | `./deploy-openshift.sh --mode spi` |
 | 12 | Provision Users | `./provision-users.sh` |
 | 13 | Provision Minimal | `./provision-minimal.sh` |
+| 14 | Undeploy from OpenShift | `./undeploy-openshift.sh` |
+
+> **Note:** Local Keycloak commands (`start-keycloaks.sh`, `stop-keycloaks.sh`) are for local development with podman-compose only. In Dev Spaces, use the OpenShift deploy/undeploy commands (10, 11, 14) instead.
 
 ## Version Management
 
