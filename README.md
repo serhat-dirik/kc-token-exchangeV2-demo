@@ -237,7 +237,7 @@ In SPI mode, the tests also create a `charlie` user dynamically to verify JIT pr
 
 ## Quick Start — OpenShift
 
-Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.If you don't have access to OpenShift or not available in your environment, you can use the [Red Hat Developer Sandbox]([url](https://developers.redhat.com/developer-sandbox)).
+Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.If you don't have access to OpenShift or not available in your environment, you can use the [Red Hat Developer Sandbox](https://developers.redhat.com/developer-sandbox).
 
 **Prerequisites**: `oc` CLI logged into an OpenShift 4.x cluster with sufficient quota for 6 pods + 3 build pods.
 
