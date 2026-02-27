@@ -269,7 +269,7 @@ All deployments include **topology annotations** (`app.openshift.io/vcs-uri`, `a
 
 The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-based IDE workspace pre-configured with all required tools.
 
-**Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.If you don't have access to Dev Spaces or not available in your environment, you can use the [Red Hat Developer Sandbox]([url](https://developers.redhat.com/developer-sandbox)).
+**Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.If you don't have access to Dev Spaces or not available in your environment, you can use the [Red Hat Developer Sandbox](https://developers.redhat.com/developer-sandbox).
 
 The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java (multiple versions), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `git`.
 
