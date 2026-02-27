@@ -237,7 +237,7 @@ In SPI mode, the tests also create a `charlie` user dynamically to verify JIT pr
 
 ## Quick Start — OpenShift
 
-Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.
+Deploy the full demo (3 Keycloak + 3 Quarkus apps) to OpenShift. Builds run on the cluster from this GitHub repo using OpenShift BuildConfigs with Containerfiles.If you don't have access to OpenShift or not available in your environment, you can use the [Red Hat Developer Sandbox]([url](https://developers.redhat.com/developer-sandbox)).
 
 **Prerequisites**: `oc` CLI logged into an OpenShift 4.x cluster with sufficient quota for 6 pods + 3 build pods.
 
@@ -269,7 +269,7 @@ All deployments include **topology annotations** (`app.openshift.io/vcs-uri`, `a
 
 The project includes a `devfile.yaml` for **OpenShift Dev Spaces** — a cloud-based IDE workspace pre-configured with all required tools.
 
-**Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.
+**Open a workspace**: Click the Dev Spaces icon on any deployment in the OpenShift Developer Console Topology view, or paste the Git repository URL into the Dev Spaces dashboard.If you don't have access to Dev Spaces or not available in your environment, you can use the [Red Hat Developer Sandbox]([url](https://developers.redhat.com/developer-sandbox)).
 
 The workspace uses the Red Hat **Universal Developer Image (UDI)**, which provides Java (multiple versions), Maven, `oc`, `kubectl`, `python3`, `curl`, `jq`, and `git`.
 
