@@ -1,0 +1,26 @@
+name: Mirror to RedHat-MEA-OpenShift
+
+on:
+  push:
+    branches:
+      - '**'       # all branches
+    tags:
+      - '**'       # all tags
+  delete:           # keep mirror clean when branches/tags are deleted
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bare clone source
+        run: |
+          git clone --bare https://github.com/${{ github.repository }}.git source.git
+
+      - name: Push mirror to org
+        run: |
+          cd source.git
+          git push --mirror \
+            https://x-access-token:${{ secrets.ORG_MIRROR_TOKEN }}@github.com/RedHat-MEA-OpenShift/kc-token-exchangeV2-demo.git
