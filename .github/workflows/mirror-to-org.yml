@@ -7,8 +7,6 @@ on:
     tags:
       - '**'       # all tags
   delete:           # keep mirror clean when branches/tags are deleted
-  schedule:
-    - cron: '0 6 * * *'   # 06:00 UTC daily
   workflow_dispatch:
 
 jobs:
