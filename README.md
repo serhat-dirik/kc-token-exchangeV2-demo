@@ -1,10 +1,14 @@
 # Keycloak Token Exchange V2 Demo
 
-A working demo of **cross-Keycloak token exchange** using the RFC 7523 JWT Authorization Grant (Token Exchange V2), with Keycloak Organizations for multi-tenant user grouping and two approaches to user lifecycle management.
+A working demo of **two complementary token-exchange patterns**:
+
+- **Cross-realm federation** using the RFC 7523 JWT Authorization Grant — App-A → App-B → App-C across three independent Keycloaks — with Keycloak Organizations for multi-tenant user grouping and two approaches to user lifecycle management.
+- **Within-realm Standard Token Exchange** (RFC 8693, "STE v2") — App-A re-audiences a user's token for one of its own internal services, demonstrating how exchange **downscopes** (and can never escalate) privilege.
 
 ## Table of Contents
 
 - [What This Demo Does](#what-this-demo-does)
+- [Within-Realm Standard Token Exchange (RFC 8693)](#within-realm-standard-token-exchange-rfc-8693)
 - [Background & Concepts](#background--concepts)
 - [Prerequisites](#prerequisites)
 - [Quick Start — Local](#quick-start--local)
@@ -21,9 +25,13 @@ A working demo of **cross-Keycloak token exchange** using the RFC 7523 JWT Autho
 
 ## What This Demo Does
 
+This demo covers **two token-exchange patterns** that solve different problems:
+
+### 1. Cross-realm federation (RFC 7523 JWT Authorization Grant)
+
 Microservices often span **multiple security domains** — each with its own Keycloak. When Service A (secured by KC-A) needs to call Service B (secured by KC-B), it can't just forward its KC-A token — KC-B won't accept it. The service needs a way to **exchange** its token from one domain for a valid token in the other.
 
-This demo shows **two approaches** to solving this:
+This is demonstrated by the **App-A → App-B → App-C** chain (button 1 in the App-A UI), with **two approaches** to the user-lifecycle question that federation raises:
 
 1. **Pre-Provisioning** (default) — A script creates users, federated links, and org memberships in KC-B/KC-C *before* any token exchange happens. Simple, no custom code, good for development and stable user bases.
 
@@ -31,9 +39,20 @@ This demo shows **two approaches** to solving this:
 
 **Both approaches produce identical results**: namespaced usernames, organization membership claims, and federated identity links.
 
+### 2. Within-realm Standard Token Exchange (RFC 8693, "STE v2")
+
+Even inside a *single* realm, a token minted for one audience should not automatically be accepted by another service. App-A demonstrates this with two more buttons that call its own internal endpoint (`/api/internal`, secured by the bearer-only `app-a-internal` resource): forwarding the original login token **fails** with a wrong-audience 403, while performing a within-realm Standard Token Exchange to re-audience the token **succeeds** — *if* the user is also entitled. See [Within-Realm Standard Token Exchange (RFC 8693)](#within-realm-standard-token-exchange-rfc-8693) below.
+
 ### Architecture
 
 ```
+                          +-----------------------------+
+   STE v2 (RFC 8693)      |   App-A internal endpoint   |
+   within realm-a         |   /api/internal             |
+   re-audience token  +-->|   aud = app-a-internal      |
+   to app-a-internal  |   |   + role reports-reader     |
+                      |   +-----------------------------+
+                      |
 +---------------+    JWT Grant     +---------------+    JWT Grant     +---------------+
 |    App-A      | ---------------> |    App-B      | ---------------> |    App-C      |
 |   (UI+Svc)    |  KC-A token ->   |   (Service)   |  KC-B token ->   |  (Terminal)   |
@@ -53,7 +72,12 @@ This demo shows **two approaches** to solving this:
                                    as external IDP                    as external IDP
 ```
 
-### Flow
+The **horizontal** chain (App-A → App-B → App-C) is the cross-realm RFC 7523 federation flow.
+The **top box** is the within-realm Standard Token Exchange (RFC 8693): App-A exchanges the
+user's own realm-a token for one whose audience is `app-a-internal`, then calls its internal
+endpoint — all inside realm-a, without ever leaving KC-A.
+
+### Flow (cross-realm, RFC 7523)
 
 1. User logs into **App-A** via **KC-A** (OIDC Authorization Code flow)
 2. User clicks "Call Downstream Service"
@@ -64,6 +88,74 @@ This demo shows **two approaches** to solving this:
 7. App-B repeats the same pattern: JWT Grant against **KC-C**, then calls **App-C**
 8. App-C is the terminal service - returns its response
 9. Responses cascade back up the chain
+
+---
+
+## Within-Realm Standard Token Exchange (RFC 8693)
+
+The cross-realm flow above is about identity crossing *security domains*. This second flow
+stays **inside realm-a** and answers a different question: should a token minted for one
+audience be accepted by a *different* service in the same realm? It also makes the security
+property of token exchange concrete — **exchange downscopes/re-audiences a token; it can
+never escalate privilege.**
+
+App-A's UI exposes **three buttons**:
+
+| # | Button | What happens | Outcome |
+|---|--------|--------------|---------|
+| 1 | **Call downstream across realms (RFC 7523)** | The existing App-A → App-B → App-C chain (unchanged). | Cascaded response |
+| 2 | **Call internal service — forward token as-is** | App-A forwards the user's **original login token** to `/api/internal`. | **403** — wrong audience: the login token's `aud` is the realm-b URL, not `app-a-internal` |
+| 3 | **Call internal service — with STE (RFC 8693)** | App-A performs a **within-realm Standard Token Exchange** to mint a token whose `aud` is `app-a-internal`, then calls `/api/internal` with it. | **200** for an entitled user; the UI shows a before/after panel (original `aud`/roles vs exchanged `aud`/roles, and the 403 → 200 outcome) |
+
+Under the hood, buttons 2 and 3 are driven by a single orchestration endpoint, `/api/ste`,
+which performs *both* the forward-as-is call and the exchange-then-call, returning
+`{before, original, after, exchanged}`. The protected resource server is `/api/internal`.
+
+### The entitlement dimension — "which users" (the teaching point)
+
+`/api/internal` enforces **two** independent conditions: (a) the token's `aud` must contain
+`app-a-internal`, **and** (b) the caller must hold the realm role **`reports-reader`**.
+In realm-a, **alice has `reports-reader`; bob does not.** Log in as each to show the matrix live:
+
+| User | Token | `aud` includes `app-a-internal`? | Has `reports-reader`? | Result |
+|------|-------|----------------------------------|------------------------|--------|
+| alice | ORIGINAL | No | yes | **403** (wrong audience) |
+| alice | EXCHANGED | yes | yes | **200** |
+| bob | ORIGINAL | No | no | **403** (wrong audience) |
+| bob | EXCHANGED | yes | **no** | **403** (re-audienced, but **not entitled**) |
+
+The key insight: exchanging **bob's** token successfully re-audiences it to `app-a-internal`,
+yet he **still** gets 403 — because the `reports-reader` role gate applies to the exchanged
+token just as it did to the original. **Standard Token Exchange downscopes / re-audiences a
+token but can never grant a privilege the user never had.**
+
+### Configuration
+
+- **`app-a-client`** (the App-A web client, realm-a) has the attribute
+  `standard.token.exchange.enabled=true`, allowing it to perform STE. (`keycloak/realms/realm-a.json`)
+- **`app-a-internal`** is a new **bearer-only** client (secret `app-a-internal-secret`) that
+  acts as the exchange **target audience / resource server**. (`keycloak/realms/realm-a.json`)
+- **Realm role `reports-reader`** is the entitlement gate enforced by `/api/internal`
+  (granted to alice, not bob).
+- App-A's Quarkus OIDC `application-type` is **`hybrid`** (interactive browser login for the
+  UI, *and* bearer-token acceptance on `/api/*`) so the STE orchestration and `test.sh` can
+  call the endpoints. (`app/src/main/resources/application.properties`)
+
+### The audience-availability gotcha
+
+A client can only mint an audience that is **"available"** to it. We make `app-a-internal`
+available to `app-a-client` via an **optional** client scope named **`internal-aud`**, which
+contains an `oidc-audience-mapper` (`included.client.audience=app-a-internal`). The exchange
+request asks for `scope=openid internal-aud`, so the audience is added only during the exchange.
+
+This scope is **created by the provisioning scripts via the admin API** — function
+`setup_internal_audience_scope` in `provision-common.sh`, called from both `provision-users.sh`
+and `provision-minimal.sh` — and is **deliberately *not* defined in the realm import JSON.**
+Why: as the [Troubleshooting](#troubleshooting) table notes, defining `clientScopes` in the
+realm import JSON overwrites Keycloak's defaults and breaks tokens. And because the scope is
+*optional*, the normal **login** token keeps its single audience (the realm-b URL), so the
+cross-realm RFC 7523 flow is completely unaffected — the `app-a-internal` audience appears
+*only* when explicitly requested during the exchange.
 
 ---
 
@@ -222,16 +314,20 @@ Each KC instance runs with:
 2. Click **Login** - Redirected to KC-A login page
 3. Login as `alice` / `alice` (or `bob` / `bob`)
 4. See welcome page with user info (name, email, roles)
-5. Click **Call Downstream Service** - See the chained response with organization info
+5. Click **Call downstream across realms (RFC 7523)** - See the chained response with organization info
+6. Click **Call internal service — forward token as-is** - See the **403** (wrong audience)
+7. Click **Call internal service — with STE (RFC 8693)** - See the before/after panel and the 403 → 200 outcome. Log in as **alice** (200 after exchange) vs **bob** (still 403 — has the audience but not the `reports-reader` role) to see that exchange cannot escalate privilege. See [Within-Realm Standard Token Exchange](#within-realm-standard-token-exchange-rfc-8693).
 
 **Admin console**: http://localhost:8180 (8280, 8380) - `admin/admin`
 
 ### Test Users (Realm-A)
 
-| Username | Password | Roles        |
-|----------|----------|-------------|
-| alice    | alice    | user, admin |
-| bob      | bob      | user        |
+| Username | Password | Roles                        |
+|----------|----------|------------------------------|
+| alice    | alice    | user, admin, reports-reader  |
+| bob      | bob      | user                         |
+
+> `reports-reader` is the entitlement gate for the within-realm STE demo: alice has it (exchange → 200), bob does not (exchange → still 403). See [Within-Realm Standard Token Exchange](#within-realm-standard-token-exchange-rfc-8693).
 
 In SPI mode, the tests also create a `charlie` user dynamically to verify JIT provisioning.
 
@@ -345,7 +441,19 @@ The test suite supports both modes and both targets:
 # OpenShift testing (uses Route URLs instead of localhost)
 ./test.sh --openshift                # Provisioning mode on OpenShift
 ./test.sh --mode spi --openshift     # SPI mode on OpenShift
+
+# Debug mode — narrate every step (combinable with any flag above)
+./test.sh --debug                    # or -d, or: DEBUG=1 ./test.sh
 ```
+
+**Debug mode (`--debug` / `-d` / `DEBUG=1`)** turns the suite into a learning tool. For each
+section it prints a blue `▶ TEST:` header, then per HTTP call a `── REQUEST ──` block with the
+**actual copy-pasteable `curl`** (the full token is shown, so you can replay it) and a
+`── RESPONSE ──` block with the pretty-printed JSON (long token blobs truncated to
+`eyJ…(N chars)`). Tokens are also decoded inline so you can watch claims change — e.g. the STE
+`aud` flip `realm-b → app-a-internal`, or the chain namespace deepen `alice → kc-a-idp.alice →
+kc-b-idp.kc-a-idp.alice`. All debug output goes to **stderr** (so captured tokens stay intact)
+and is gated off by default — the normal run is unchanged. Capture with `./test.sh --debug 2>&1 | tee run.log`.
 
 **Core tests** (both modes, ~28 tests):
 - Infrastructure health checks (3 KCs + 3 apps)
@@ -354,6 +462,7 @@ The test suite supports both modes and both targets:
 - Service chain: App-A → App-B → App-C (identity preservation)
 - Bob tests (JWT Grant + full chain)
 - UI tests (welcome page, OIDC redirect)
+- **Within-realm STE (RFC 8693)**: verifies the exchange yields `aud=app-a-internal` and the enforcement matrix (alice original → 403, alice exchanged → 200, bob original → 403, bob exchanged → 403). Runs both locally and with `--openshift`.
 
 **Provisioning-specific tests** (~3 tests):
 - Pre-existence verification of alice and bob in realm-b and realm-c
@@ -541,6 +650,8 @@ podman rm -f kc-a kc-b kc-c
 | "User not found" (SPI mode) | SPI JAR not mounted in KC container | Verify `docker-compose.spi.yml` mounts the JAR and rebuild: `./mvnw package -pl spi -DskipTests` |
 | Realm changes not taking effect | KC only imports on first startup | Remove containers completely (`podman rm -f kc-a kc-b kc-c`) then recreate |
 | "Token reuse detected" | JWT Grant assertion `jti` was already used - KC enforces single-use | In the app, each call refreshes the OIDC session to get a fresh access token with a new `jti`. In curl/scripts, always get a fresh token before each JWT Grant call |
+| STE returns "audience not available" / exchanged token lacks `app-a-internal` | The `internal-aud` optional scope wasn't created on `app-a-client` | Run a provisioning script — `setup_internal_audience_scope` (in `provision-common.sh`) creates the scope via the admin API; do **not** add it to the realm import JSON |
+| STE exchange succeeds (`aud=app-a-internal`) but `/api/internal` still returns 403 | Caller lacks the `reports-reader` realm role (e.g. bob) | Expected — exchange re-audiences but cannot escalate privilege; grant `reports-reader` to the user if access is intended |
 | Organization claim missing from token | `organization` scope not a default client scope | Run provisioning script or manually promote `organization` to default scope on the M2M client |
 | "Organizations not enabled" error | Feature flag missing or `organizationsEnabled` not set | Ensure `KC_FEATURES` includes `organization` and realm JSON has `"organizationsEnabled": true` |
 | SPI JAR build fails | Java/Maven not configured | Ensure Java 21+ is available: `java -version`. Use SDKMAN: `sdk install java 21-tem` |

@@ -16,6 +16,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/provision-common.sh"
 
+KC_A="http://localhost:8180"
 KC_B="http://localhost:8280"
 KC_C="http://localhost:8380"
 
@@ -31,9 +32,15 @@ echo "" >&2
 
 # ---- Step 1: Get admin tokens ----
 log_info "Getting admin tokens..."
+TOKEN_A=$(get_admin_token "$KC_A") || { log_error "Cannot get admin token for KC-A"; exit 1; }
 TOKEN_B=$(get_admin_token "$KC_B") || { log_error "Cannot get admin token for KC-B"; exit 1; }
 TOKEN_C=$(get_admin_token "$KC_C") || { log_error "Cannot get admin token for KC-C"; exit 1; }
 log_info "Admin tokens acquired."
+echo "" >&2
+
+# ---- Standard Token Exchange (RFC 8693) within-realm demo: app-a-internal audience scope ----
+log_info "Configuring within-realm Standard Token Exchange demo (realm-a)..."
+setup_internal_audience_scope "$KC_A" "realm-a" "app-a-client" "app-a-internal" "internal-aud" "$TOKEN_A"
 echo "" >&2
 
 # ---- Step 2: Create Organizations ----

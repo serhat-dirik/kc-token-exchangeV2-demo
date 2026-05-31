@@ -18,6 +18,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Path("/")
@@ -35,6 +36,22 @@ public class UiResource {
             String error
     ) {}
 
+    /**
+     * View model for the within-realm Standard Token Exchange (RFC 8693) panel.
+     * Captures both call outcomes plus the before/after token audience and roles.
+     */
+    public record SteView(
+            int originalStatus,
+            String originalReason,
+            String beforeAud,
+            String beforeRoles,
+            int exchangedStatus,
+            String exchangedReason,
+            String afterAud,
+            String afterRoles,
+            String prettyJson
+    ) {}
+
     @Inject
     Template index;
 
@@ -48,11 +65,17 @@ public class UiResource {
     @Inject
     TokenExchangeService tokenExchangeService;
 
+    @Inject
+    SteResource steResource;
+
     @ConfigProperty(name = "app.name")
     String appName;
 
     @ConfigProperty(name = "app.target-service-url")
     Optional<String> targetServiceUrl;
+
+    @ConfigProperty(name = "app.internal-url")
+    Optional<String> internalUrl;
 
     @GET
     @Produces(MediaType.TEXT_HTML)
@@ -63,10 +86,12 @@ public class UiResource {
                 .data("email", "")
                 .data("roles", "")
                 .data("hasTargetService", targetServiceUrl.isPresent() && !targetServiceUrl.get().isBlank())
+                .data("hasInternalService", internalUrl.isPresent() && !internalUrl.get().isBlank())
                 .data("serviceResponse", "")
                 .data("serviceChain", List.of())
                 .data("prettyJson", "")
-                .data("isError", false);
+                .data("isError", false)
+                .data("steResult", null);
     }
 
     @GET
@@ -91,7 +116,31 @@ public class UiResource {
         return buildSecuredPage(serviceResponse);
     }
 
+    @GET
+    @Path("/secured/call-internal")
+    @Authenticated
+    @Produces(MediaType.TEXT_HTML)
+    public TemplateInstance callInternal() {
+        // Orchestrate forward-as-is + Standard Token Exchange via SteResource,
+        // then render the structured outcome (before/after aud + roles, statuses).
+        SteView view = null;
+        if (internalUrl.isPresent() && !internalUrl.get().isBlank()) {
+            try {
+                Map<String, Object> ste = steResource.ste();
+                view = toSteView(ste);
+            } catch (Exception e) {
+                view = new SteView(0, "STE error: " + e.getMessage(), "", "",
+                        0, "", "", "", prettyPrintObject(Map.of("error", e.getMessage())));
+            }
+        }
+        return buildSecuredPage("", view);
+    }
+
     private TemplateInstance buildSecuredPage(String serviceResponse) {
+        return buildSecuredPage(serviceResponse, null);
+    }
+
+    private TemplateInstance buildSecuredPage(String serviceResponse, SteView steResult) {
         String name = idToken.getClaim("preferred_username");
         if (name == null || name.isBlank()) {
             name = idToken.getName();
@@ -124,10 +173,12 @@ public class UiResource {
                 .data("email", email != null ? email : "N/A")
                 .data("roles", roles)
                 .data("hasTargetService", targetServiceUrl.isPresent() && !targetServiceUrl.get().isBlank())
+                .data("hasInternalService", internalUrl.isPresent() && !internalUrl.get().isBlank())
                 .data("serviceResponse", serviceResponse)
                 .data("serviceChain", serviceChain)
                 .data("prettyJson", prettyJson)
-                .data("isError", isError);
+                .data("isError", isError)
+                .data("steResult", steResult);
     }
 
     // ---- JSON parsing helpers for structured UI display ----
@@ -270,6 +321,66 @@ public class UiResource {
             } else {
                 expandNestedJson(child, mapper);
             }
+        }
+    }
+
+    // ---- Standard Token Exchange (RFC 8693) view helpers ----
+
+    /**
+     * Converts the raw /api/ste result map into the structured {@link SteView}
+     * used by the template.
+     */
+    @SuppressWarnings("unchecked")
+    private SteView toSteView(Map<String, Object> ste) {
+        Map<String, Object> original = (Map<String, Object>) ste.getOrDefault("original", Map.of());
+        Map<String, Object> exchanged = (Map<String, Object>) ste.getOrDefault("exchanged", Map.of());
+        Map<String, Object> before = (Map<String, Object>) ste.getOrDefault("before", Map.of());
+        Map<String, Object> after = (Map<String, Object>) ste.getOrDefault("after", Map.of());
+
+        return new SteView(
+                asInt(original.get("status")),
+                reasonOf(original),
+                stringOf(before.get("aud")),
+                stringOf(before.get("roles")),
+                asInt(exchanged.get("status")),
+                reasonOf(exchanged),
+                stringOf(after.get("aud")),
+                stringOf(after.get("roles")),
+                prettyPrintObject(ste)
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private String reasonOf(Map<String, Object> outcome) {
+        if (outcome.containsKey("reason")) {
+            return stringOf(outcome.get("reason"));
+        }
+        Object body = outcome.get("body");
+        if (body instanceof JsonNode node) {
+            if (node.hasNonNull("reason")) return node.get("reason").asText();
+            if (node.hasNonNull("message")) return node.get("message").asText();
+        } else if (body instanceof Map<?, ?> map) {
+            if (map.containsKey("reason")) return stringOf(map.get("reason"));
+            if (map.containsKey("message")) return stringOf(map.get("message"));
+        }
+        return body != null ? stringOf(body) : "";
+    }
+
+    private int asInt(Object o) {
+        if (o instanceof Number n) return n.intValue();
+        try { return o != null ? Integer.parseInt(o.toString()) : 0; }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    private String stringOf(Object o) {
+        return o == null ? "" : o.toString();
+    }
+
+    private String prettyPrintObject(Object obj) {
+        try {
+            return new ObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(obj);
+        } catch (Exception e) {
+            return String.valueOf(obj);
         }
     }
 }

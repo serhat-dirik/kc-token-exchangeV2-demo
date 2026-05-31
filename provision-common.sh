@@ -381,3 +381,49 @@ for s in scopes:
         return 0
     fi
 }
+
+# Set up the within-realm Standard Token Exchange (RFC 8693) demo audience scope.
+# Creates an OPTIONAL client scope carrying an audience mapper for the target (internal)
+# client and assigns it to the requesting client. Optional (not default) so it stays out of
+# normal login tokens — keeping the cross-realm JWT-grant flow's single-audience intact — and
+# only materialises when the token exchange requests audience=<target_client>.
+setup_internal_audience_scope() {
+    local kc_url="$1"             # e.g. http://localhost:8180
+    local realm="$2"             # e.g. realm-a
+    local requesting_client="$3" # e.g. app-a-client (performs the exchange)
+    local target_client="$4"     # e.g. app-a-internal (the internal resource / audience)
+    local scope_name="$5"        # e.g. internal-aud
+    local token="$6"
+
+    local list_url="${kc_url}/admin/realms/${realm}/client-scopes"
+    local scope_id
+    scope_id=$(curl -sf "$list_url" -H "Authorization: Bearer ${token}" \
+        | python3 -c "import sys,json;print(next((s['id'] for s in json.load(sys.stdin) if s.get('name')=='${scope_name}'),''))" 2>/dev/null)
+
+    if [ -z "$scope_id" ]; then
+        curl -s -o /dev/null -X POST "$list_url" \
+            -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"${scope_name}\",\"protocol\":\"openid-connect\",\"attributes\":{\"include.in.token.scope\":\"true\",\"display.on.consent.screen\":\"false\"},\"protocolMappers\":[{\"name\":\"${target_client}-audience\",\"protocol\":\"openid-connect\",\"protocolMapper\":\"oidc-audience-mapper\",\"config\":{\"included.client.audience\":\"${target_client}\",\"access.token.claim\":\"true\",\"id.token.claim\":\"false\",\"introspection.token.claim\":\"true\"}}]}"
+        scope_id=$(curl -sf "$list_url" -H "Authorization: Bearer ${token}" \
+            | python3 -c "import sys,json;print(next((s['id'] for s in json.load(sys.stdin) if s.get('name')=='${scope_name}'),''))" 2>/dev/null)
+        log_info "  Created client scope '${scope_name}' (audience '${target_client}') in ${realm}"
+    fi
+    [ -z "$scope_id" ] && { log_warn "  Could not create/find scope '${scope_name}' in ${realm}"; return 0; }
+
+    local cid
+    cid=$(curl -sf "${kc_url}/admin/realms/${realm}/clients?clientId=${requesting_client}" \
+        -H "Authorization: Bearer ${token}" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])" 2>/dev/null)
+    [ -z "$cid" ] && { log_error "  Client '${requesting_client}' not found in ${realm}"; return 1; }
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        "${kc_url}/admin/realms/${realm}/clients/${cid}/optional-client-scopes/${scope_id}" \
+        -H "Authorization: Bearer ${token}")
+    if [ "$http_code" = "204" ] || [ "$http_code" = "200" ]; then
+        log_info "  Assigned optional scope '${scope_name}' to '${requesting_client}' in ${realm}"
+    else
+        log_warn "  Could not assign optional scope '${scope_name}' (HTTP ${http_code}) — may already be assigned"
+    fi
+    return 0
+}

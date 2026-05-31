@@ -43,6 +43,11 @@ TOKEN_C=$(get_admin_token "$KC_C") || { log_error "Cannot get admin token for KC
 log_info "Admin tokens acquired for all 3 KC instances."
 echo "" >&2
 
+# ---- Standard Token Exchange (RFC 8693) within-realm demo: app-a-internal audience scope ----
+log_info "Configuring within-realm Standard Token Exchange demo (realm-a)..."
+setup_internal_audience_scope "$KC_A" "realm-a" "app-a-client" "app-a-internal" "internal-aud" "$TOKEN_A"
+echo "" >&2
+
 # ---- Step 2: Get user IDs from KC-A (realm-a) ----
 log_info "Reading users from KC-A (realm-a)..."
 

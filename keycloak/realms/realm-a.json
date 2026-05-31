@@ -18,6 +18,10 @@
       {
         "name": "admin",
         "description": "Admin role"
+      },
+      {
+        "name": "reports-reader",
+        "description": "May read the internal Reports service (STE v2 demo)"
       }
     ]
   },
@@ -35,7 +39,7 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["user", "admin", "default-roles-realm-a"]
+      "realmRoles": ["user", "admin", "reports-reader", "default-roles-realm-a"]
     },
     {
       "username": "bob",
@@ -56,7 +60,7 @@
   "scopeMappings": [
     {
       "client": "app-a-client",
-      "roles": ["user", "admin"]
+      "roles": ["user", "admin", "reports-reader"]
     }
   ],
   "clients": [
@@ -78,6 +82,9 @@
       "webOrigins": [
         "http://localhost:8081"
       ],
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      },
       "protocolMappers": [
         {
           "name": "realm-b-audience",
@@ -93,6 +100,20 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "app-a-internal",
+      "name": "App A Internal Reports Service",
+      "description": "Resource server for the within-realm STE v2 demo; exchange target audience",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "app-a-internal-secret",
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocol": "openid-connect"
     }
   ]
 }

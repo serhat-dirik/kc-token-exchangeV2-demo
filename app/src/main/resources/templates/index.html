@@ -70,10 +70,90 @@
 
         <div class="actions">
             {#if hasTargetService}
-            <a href="/secured/call-service" class="btn btn-primary">Call Downstream Service</a>
+            <a href="/secured/call-service" class="btn btn-primary">Call downstream across realms (RFC 7523)</a>
+            {/if}
+            {#if hasInternalService}
+            <a href="/secured/call-internal" class="btn btn-secondary">Call internal service &mdash; with STE (RFC 8693)</a>
             {/if}
             <a href="/logout" class="btn btn-danger">Logout</a>
         </div>
+
+        {#if steResult != null}
+        <div class="response-section">
+            <h3>Within-Realm Standard Token Exchange (RFC 8693)</h3>
+
+            <div class="hop-card">
+                <div class="hop-header">
+                    <span class="hop-badge">Forward as-is</span>
+                    <strong>Original token &rarr; /api/internal</strong>
+                </div>
+                <div class="hop-body">
+                    <div class="hop-field">
+                        <span class="hop-label">Outcome</span>
+                        <span>
+                            {#if steResult.originalStatus == 200}
+                            <span class="badge" style="background:#e6f4ea;color:#34a853;">200 ACCEPTED</span>
+                            {#else}
+                            <span class="badge" style="background:#fff3f3;color:#dc3545;">{steResult.originalStatus} REJECTED</span>
+                            {/if}
+                        </span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">aud</span>
+                        <span class="issuer">{steResult.beforeAud}</span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">roles</span>
+                        <span>{steResult.beforeRoles}</span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">Reason</span>
+                        <span>{steResult.originalReason}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chain-arrow">&#8595; exchange</div>
+
+            <div class="hop-card hop-downstream">
+                <div class="hop-header">
+                    <span class="hop-badge">After STE</span>
+                    <strong>Exchanged token &rarr; /api/internal</strong>
+                </div>
+                <div class="hop-body">
+                    <div class="hop-field">
+                        <span class="hop-label">Outcome</span>
+                        <span>
+                            {#if steResult.exchangedStatus == 200}
+                            <span class="badge" style="background:#e6f4ea;color:#34a853;">200 ACCEPTED</span>
+                            {#else}
+                            <span class="badge" style="background:#fff3f3;color:#dc3545;">{steResult.exchangedStatus} REJECTED</span>
+                            {/if}
+                        </span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">aud</span>
+                        <span class="issuer">{steResult.afterAud}</span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">roles</span>
+                        <span>{steResult.afterRoles}</span>
+                    </div>
+                    <div class="hop-field">
+                        <span class="hop-label">Reason</span>
+                        <span>{steResult.exchangedReason}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <button class="btn btn-secondary" onclick="document.getElementById('ste-json').classList.toggle('hidden')">
+                    Toggle Raw JSON
+                </button>
+                <div id="ste-json" class="service-response hidden">{steResult.prettyJson}</div>
+            </div>
+        </div>
+        {/if}
 
         {#if serviceResponse != null && serviceResponse != ""}
         <div class="response-section">

@@ -68,6 +68,13 @@ public class TokenExchangeService {
     @ConfigProperty(name = "quarkus.oidc.credentials.secret")
     String oidcClientSecret;
 
+    // Within-realm Standard Token Exchange (RFC 8693) settings (App-A only)
+    @ConfigProperty(name = "app.ste.audience")
+    Optional<String> steAudience;
+
+    @ConfigProperty(name = "app.ste.scope")
+    Optional<String> steScope;
+
     public String callDownstreamService() {
         if (targetServiceUrl.isEmpty() || targetServiceUrl.get().isBlank()) {
             return "No downstream service configured.";
@@ -90,6 +97,88 @@ public class TokenExchangeService {
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Token exchange or service call failed", e);
             return "Error calling downstream service: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Returns the caller's CURRENT raw access token, without refreshing.
+     * Supports both web-app mode (AccessTokenCredential from the OIDC session)
+     * and service/bearer mode (the injected JsonWebToken). This is the ORIGINAL
+     * login token — its audience is the realm-b URL, NOT app-a-internal.
+     */
+    public String getCurrentAccessToken() {
+        if (accessTokenCredential.isResolvable()) {
+            try {
+                AccessTokenCredential cred = accessTokenCredential.get();
+                if (cred != null && cred.getToken() != null && !cred.getToken().isBlank()) {
+                    return cred.getToken();
+                }
+            } catch (Exception e) {
+                LOG.fine("AccessTokenCredential not available: " + e.getMessage());
+            }
+        }
+        if (jwt != null && jwt.getRawToken() != null) {
+            return jwt.getRawToken();
+        }
+        return null;
+    }
+
+    /**
+     * RFC 8693 Standard Token Exchange — within the SAME realm.
+     * Exchanges the caller's current access token for one whose audience is the
+     * internal resource (app.ste.audience), carrying the user's realm roles.
+     *
+     * POST {local-kc}/protocol/openid-connect/token
+     *   grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+     *   subject_token={current access token}
+     *   subject_token_type=urn:ietf:params:oauth:token-type:access_token
+     *   client_id={quarkus.oidc.client-id}
+     *   client_secret={quarkus.oidc.credentials.secret}
+     *   audience={app.ste.audience}
+     *   scope={app.ste.scope}
+     *
+     * @return the exchanged access token string
+     * @throws Exception if no subject token is available or the exchange fails
+     */
+    public String exchangeWithinRealm() throws Exception {
+        String subjectToken = getCurrentAccessToken();
+        if (subjectToken == null || subjectToken.isBlank()) {
+            throw new IllegalStateException("No access token available for Standard Token Exchange.");
+        }
+
+        String tokenUrl = oidcAuthServerUrl + "/protocol/openid-connect/token";
+        Map<String, String> formData = Map.of(
+                "grant_type", "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token", subjectToken,
+                "subject_token_type", "urn:ietf:params:oauth:token-type:access_token",
+                "client_id", oidcClientId,
+                "client_secret", oidcClientSecret,
+                "audience", steAudience.orElse(""),
+                "scope", steScope.orElse("openid")
+        );
+
+        String body = formData.entrySet().stream()
+                .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "="
+                        + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
+                .collect(Collectors.joining("&"));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(tokenUrl))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        LOG.info("Performing within-realm Standard Token Exchange (RFC 8693) at: " + tokenUrl
+                + " audience=" + steAudience.orElse(""));
+
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                LOG.severe("Standard Token Exchange failed: HTTP " + response.statusCode() + " - " + response.body());
+                throw new RuntimeException("Standard Token Exchange failed (HTTP "
+                        + response.statusCode() + "): " + response.body());
+            }
+            return extractAccessToken(response.body());
         }
     }
 
