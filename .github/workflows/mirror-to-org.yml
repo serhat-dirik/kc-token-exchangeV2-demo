@@ -11,6 +11,11 @@ on:
 
 jobs:
   mirror:
+    # Only run in the source repo. The --mirror push copies this workflow into the
+    # org repo too; without this guard it re-runs there, fails on the missing
+    # ORG_MIRROR_TOKEN secret, and reports a failure. In the mirrored copy this
+    # evaluates false, so the job is skipped instead of failing.
+    if: github.repository == 'serhat-dirik/kc-token-exchangeV2-demo'
     runs-on: ubuntu-latest
     steps:
       - name: Bare clone source
