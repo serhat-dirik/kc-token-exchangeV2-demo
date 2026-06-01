@@ -193,18 +193,28 @@ echo "[6/9] Creating app ConfigMaps..."
 
 oc delete configmap app-a-config app-b-config app-c-config 2>/dev/null || true
 
+# App-A is the only UI node. It needs:
+#  - application-type=hybrid: interactive web-app login for the browser UI AND
+#    bearer-token acceptance on /api/* (so the within-realm STE flow can call
+#    /api/internal with the exchanged token). 'web-app' would 302-redirect that call.
+#  - APP_INTERNAL_URL: App-A's self-call to its own internal Reports service. On
+#    OpenShift the container listens on 8080 (not the local 8081), so use localhost:8080.
+#  - APP_STE_*: within-realm Standard Token Exchange (RFC 8693) audience + scope.
 oc create configmap app-a-config \
     --from-literal=APP_NAME="App-A (UI + Service)" \
     --from-literal=QUARKUS_OIDC_AUTH_SERVER_URL="${KC_A_ROUTE}/realms/realm-a" \
     --from-literal=QUARKUS_OIDC_CLIENT_ID="app-a-client" \
-    --from-literal=QUARKUS_OIDC_APPLICATION_TYPE="web-app" \
+    --from-literal=QUARKUS_OIDC_APPLICATION_TYPE="hybrid" \
     --from-literal=QUARKUS_OIDC_ROLES_SOURCE="accesstoken" \
     --from-literal=QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING="true" \
     --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_HOST="true" \
     --from-literal=QUARKUS_HTTP_PROXY_ENABLE_FORWARDED_PREFIX="true" \
     --from-literal=APP_TARGET_SERVICE_URL="http://app-b:8080/api/hello" \
     --from-literal=APP_TARGET_KC_TOKEN_URL="${KC_B_ROUTE}/realms/realm-b/protocol/openid-connect/token" \
-    --from-literal=APP_TARGET_KC_CLIENT_ID="app-a-m2m-client"
+    --from-literal=APP_TARGET_KC_CLIENT_ID="app-a-m2m-client" \
+    --from-literal=APP_INTERNAL_URL="http://localhost:8080/api/internal" \
+    --from-literal=APP_STE_AUDIENCE="app-a-internal" \
+    --from-literal=APP_STE_SCOPE="openid internal-aud"
 
 oc create configmap app-b-config \
     --from-literal=APP_NAME="App-B (Service)" \
